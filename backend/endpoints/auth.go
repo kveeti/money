@@ -8,10 +8,15 @@ import (
 	"money/backend/data"
 	"money/backend/state"
 	"net/http"
+	"net/netip"
+	"strings"
 	"time"
 )
 
-const sessionDuration = 7 * 24 * time.Hour
+const (
+	sessionDuration = 7 * 24 * time.Hour
+	demoDuration    = 30 * time.Minute
+)
 
 // flowState is the short-lived per-login state stored in the flow cookie and
 // checked when the provider redirects back to the callback.
@@ -19,6 +24,63 @@ type flowState struct {
 	State    string `json:"state"`
 	Nonce    string `json:"nonce"`
 	Verifier string `json:"verifier"`
+}
+
+func HandleDemoLogin(st *state.State) Handler {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		if !st.Config.DemoMode {
+			return NewErr("demo mode is not enabled", http.StatusNotFound)
+		}
+		if st.Config.ClientIPHeader != "" {
+			clientIP, ok := clientIPFromHeader(r.Header.Get(st.Config.ClientIPHeader))
+			if !ok {
+				return NewErr("missing or invalid client IP", http.StatusBadRequest)
+			}
+			allowed, err := st.Data.AllowDemoCreation(
+				r.Context(), clientIP,
+				st.Config.DemoRateLimitPerMinute,
+				st.Config.DemoRateLimitPerHour,
+			)
+			if err != nil {
+				return NewUnexpectedErr("error checking demo creation limit: %w", err)
+			}
+			if !allowed {
+				w.Header().Set("Retry-After", "60")
+				return NewErr("too many demo accounts; try again later", http.StatusTooManyRequests)
+			}
+		}
+
+		now := time.Now()
+		expiresAt := now.Add(demoDuration)
+		userID := data.NewPrivateID()
+		user := data.User{
+			ID:            userID,
+			Subject:       userID,
+			Issuer:        "demo",
+			Email:         "demo@demo.invalid",
+			CreatedAt:     now,
+			IsDemo:        true,
+			DemoExpiresAt: &expiresAt,
+		}
+		if err := st.Data.CreateDemoUser(r.Context(), user); err != nil {
+			return NewUnexpectedErr("error creating demo user: %w", err)
+		}
+		if err := issueSession(w, st, r, user.ID, demoDuration); err != nil {
+			return err
+		}
+
+		http.Redirect(w, r, st.Config.EffectiveFrontUrl()+"/transactions", http.StatusSeeOther)
+		return nil
+	}
+}
+
+func clientIPFromHeader(value string) (string, bool) {
+	value, _, _ = strings.Cut(value, ",")
+	address, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil {
+		return "", false
+	}
+	return address.Unmap().String(), true
 }
 
 // HandleLogin starts the OIDC authorization-code flow: it generates state,
@@ -94,7 +156,7 @@ func HandleCallback(st *state.State) Handler {
 			}
 		}
 
-		if err := issueSession(w, st, r, user.ID); err != nil {
+		if err := issueSession(w, st, r, user.ID, sessionDuration); err != nil {
 			return err
 		}
 
@@ -126,14 +188,14 @@ func HandleLogout(state *state.State) Handler {
 // issueSession creates a session row keyed by the hash of a new opaque token
 // and sets that token as the auth cookie. Call it once the OIDC identity is
 // verified.
-func issueSession(w http.ResponseWriter, st *state.State, r *http.Request, userID string) error {
+func issueSession(w http.ResponseWriter, st *state.State, r *http.Request, userID string, duration time.Duration) error {
 	rawToken, tokenHash, err := auth.NewSessionToken()
 	if err != nil {
 		return NewUnexpectedErr("error generating session token: %w", err)
 	}
 
 	now := time.Now()
-	expiry := now.Add(sessionDuration)
+	expiry := now.Add(duration)
 
 	session := data.Session{
 		ID:        data.NewPrivateID(),

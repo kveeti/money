@@ -30,10 +30,25 @@ func FrontendHandler(st *state.State, dist fs.FS) http.Handler {
 	}
 	files := http.FileServer(http.FS(dist))
 
+	loginURL := "/login"
+	if st.Config.DemoMode {
+		loginURL += "?demo=1"
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isNavigation(r) {
-			if _, err := Authenticate(st, r); err != nil {
-				http.Redirect(w, r, "/api/v1/auth/login", http.StatusFound)
+			_, authErr := Authenticate(st, r)
+			if r.URL.Path == "/login" {
+				if authErr == nil {
+					http.Redirect(w, r, "/transactions", http.StatusFound)
+					return
+				}
+				if r.URL.RequestURI() != loginURL {
+					http.Redirect(w, r, loginURL, http.StatusFound)
+					return
+				}
+			} else if authErr != nil {
+				http.Redirect(w, r, loginURL, http.StatusFound)
 				return
 			}
 		}

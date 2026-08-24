@@ -6,6 +6,7 @@ export interface Me {
   id: string;
   email: string;
   home_currency: string;
+  is_demo: boolean;
   enable_banking_available: boolean;
 }
 

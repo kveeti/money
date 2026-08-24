@@ -3,15 +3,21 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/textproto"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	IsProd     bool
-	Port       string
-	BackendUrl string
+	IsProd                 bool
+	DemoMode               bool
+	ClientIPHeader         string
+	DemoRateLimitPerMinute int
+	DemoRateLimitPerHour   int
+	Port                   string
+	BackendUrl             string
 	// FrontUrl is empty when the frontend is served from the same origin as the
 	// backend. When set (separate origin, e.g. a dev server) it enables CORS and
 	// is used as the post-login redirect target.
@@ -77,6 +83,10 @@ func (c *Config) SecureCookies() bool {
 func (c Config) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Bool("is_prod", c.IsProd),
+		slog.Bool("demo_mode", c.DemoMode),
+		slog.String("client_ip_header", c.ClientIPHeader),
+		slog.Int("demo_rate_limit_per_minute", c.DemoRateLimitPerMinute),
+		slog.Int("demo_rate_limit_per_hour", c.DemoRateLimitPerHour),
 		slog.String("port", c.Port),
 		slog.String("backend_url", c.BackendUrl),
 		slog.String("front_url", c.FrontUrl),
@@ -98,6 +108,34 @@ func (c Config) LogValue() slog.Value {
 			slog.Int("allowed_subjects", len(c.EnableBanking.AllowedSubjects)),
 		),
 	)
+}
+
+func positiveIntEnv(name string, defaultValue int) (int, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("invalid config: %s must be a positive integer", name)
+	}
+	return parsed, nil
+}
+
+func validHeaderName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range []byte(value) {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			strings.ContainsRune("!#$%&'*+-.^_`|~", rune(char)) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func parseSubjectAllowlist(value string) map[string]struct{} {
@@ -127,21 +165,43 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid config: IS_PROD must be 0 or 1")
 	}
 
+	demoMode := false
+	switch value := os.Getenv("DEMO_MODE"); value {
+	case "", "0":
+	case "1":
+		demoMode = true
+	default:
+		return nil, fmt.Errorf("invalid config: DEMO_MODE must be 0 or 1")
+	}
+
+	minuteLimit, err := positiveIntEnv("DEMO_RATE_LIMIT_PER_MINUTE", 5)
+	if err != nil {
+		return nil, err
+	}
+	hourLimit, err := positiveIntEnv("DEMO_RATE_LIMIT_PER_HOUR", 30)
+	if err != nil {
+		return nil, err
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8000"
 	}
 
 	config := &Config{
-		IsProd:          isProd,
-		Port:            port,
-		BackendUrl:      os.Getenv("BACKEND_URL"),
-		FrontUrl:        os.Getenv("FRONT_URL"),
-		DevViteUrl:      os.Getenv("DEV_VITE_URL"),
-		DbUrl:           os.Getenv("DB_URL"),
-		ImportStore:     os.Getenv("IMPORT_STORE"),
-		ImportDir:       os.Getenv("IMPORT_DIR"),
-		DisableRateSync: os.Getenv("DISABLE_RATE_SYNC") == "1",
+		IsProd:                 isProd,
+		DemoMode:               demoMode,
+		ClientIPHeader:         os.Getenv("CLIENT_IP_HEADER"),
+		DemoRateLimitPerMinute: minuteLimit,
+		DemoRateLimitPerHour:   hourLimit,
+		Port:                   port,
+		BackendUrl:             os.Getenv("BACKEND_URL"),
+		FrontUrl:               os.Getenv("FRONT_URL"),
+		DevViteUrl:             os.Getenv("DEV_VITE_URL"),
+		DbUrl:                  os.Getenv("DB_URL"),
+		ImportStore:            os.Getenv("IMPORT_STORE"),
+		ImportDir:              os.Getenv("IMPORT_DIR"),
+		DisableRateSync:        os.Getenv("DISABLE_RATE_SYNC") == "1",
 		EnableBanking: EnableBankingConfig{
 			ApplicationID:   os.Getenv("ENABLEBANKING_APP_ID"),
 			PrivateKeyPath:  os.Getenv("ENABLEBANKING_PRIVATE_KEY"),
@@ -167,6 +227,13 @@ func LoadConfig() (*Config, error) {
 		if value == "" {
 			return nil, fmt.Errorf("invalid config: %s not set", name)
 		}
+	}
+
+	if config.ClientIPHeader != "" {
+		if !validHeaderName(config.ClientIPHeader) {
+			return nil, fmt.Errorf("invalid config: CLIENT_IP_HEADER must be an HTTP header name")
+		}
+		config.ClientIPHeader = textproto.CanonicalMIMEHeaderKey(config.ClientIPHeader)
 	}
 
 	if config.EnableBanking.APIOrigin == "" {

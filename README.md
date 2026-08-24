@@ -59,6 +59,10 @@ Optional settings:
 | `IMPORT_STORE` | `postgres` | Import file storage: `postgres` or `disk`. |
 | `IMPORT_DIR` | unset | Import directory when `IMPORT_STORE=disk`. |
 | `DISABLE_RATE_SYNC` | `0` | Set to `1` to stop exchange-rate syncing. |
+| `DEMO_MODE` | `0` | Set to `1` to allow 30-minute public demo accounts. |
+| `CLIENT_IP_HEADER` | unset | Trusted proxy header containing the client IP. Demo creation limits are off when unset. |
+| `DEMO_RATE_LIMIT_PER_MINUTE` | `5` | Demo accounts allowed per client IP per minute. |
+| `DEMO_RATE_LIMIT_PER_HOUR` | `30` | Demo accounts allowed per client IP per hour. |
 | `ENABLEBANKING_APP_ID` | unset | Enable Banking application ID. Set with `ENABLEBANKING_PRIVATE_KEY`. |
 | `ENABLEBANKING_PRIVATE_KEY` | unset | Path to the Enable Banking private key. Set with `ENABLEBANKING_APP_ID`. |
 | `ENABLEBANKING_API_ORIGIN` | `https://api.enablebanking.com` | Enable Banking API origin. Register `BACKEND_URL/api/v1/enablebanking/callback` as the callback. |

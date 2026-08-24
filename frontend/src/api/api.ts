@@ -18,6 +18,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, text || res.statusText);
   }
 
+  if (res.status === 401 && window.location.pathname !== "/login") {
+    window.location.assign("/login");
+  }
+
   if (!res.ok) {
     const error = (body as { error?: string })?.error;
     throw new ApiError(res.status, error || text || res.statusText);

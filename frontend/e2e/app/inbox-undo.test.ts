@@ -6,6 +6,7 @@ const nordeaHeader = "date,occurred_at,amount,currency,counterparty,note\n";
 
 async function login(page: Page, user: string) {
   await page.goto("/");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByPlaceholder("new-user-sub").fill(user);
   await page.getByRole("button", { name: "Log in as new user" }).click();
   await expect

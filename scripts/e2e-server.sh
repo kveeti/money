@@ -50,10 +50,11 @@ done
 PORT="$backend_port" \
 BACKEND_URL="http://127.0.0.1:$backend_port" \
 FRONT_URL= \
-DEV_VITE_URL="${DEV_VITE_URL-http://127.0.0.1:3001}" \
+DEV_VITE_URL="http://127.0.0.1:3001" \
 DB_URL="$database_url" \
 IMPORT_STORE=postgres \
 DISABLE_RATE_SYNC=1 \
+DEMO_MODE=1 \
 OIDC_ISSUER="http://127.0.0.1:$idp_port" \
 OIDC_CLIENT_ID=dash \
 OIDC_CLIENT_SECRET=dash \

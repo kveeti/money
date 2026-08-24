@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"money/backend/auth"
 	"money/backend/config"
@@ -43,6 +44,8 @@ type appOpts struct {
 	frontURL          string
 	redirectURL       string
 	denyEnableBanking bool
+	demoMode          bool
+	clientIPHeader    string
 }
 
 // newTestAppWith wires a mock OIDC provider, a fresh database and the real
@@ -81,8 +84,12 @@ func newTestAppWith(t *testing.T, opts appOpts) *testApp {
 		allowedSubjects = map[string]struct{}{}
 	}
 	appConfig := &config.Config{
-		BackendUrl: appURL,
-		FrontUrl:   opts.frontURL,
+		BackendUrl:             appURL,
+		FrontUrl:               opts.frontURL,
+		DemoMode:               opts.demoMode,
+		ClientIPHeader:         opts.clientIPHeader,
+		DemoRateLimitPerMinute: 5,
+		DemoRateLimitPerHour:   30,
 		EnableBanking: config.EnableBankingConfig{
 			AllowedSubjects: allowedSubjects,
 		},
@@ -137,6 +144,89 @@ func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+func TestDemoLoginCreatesExpiringSeededAccount(t *testing.T) {
+	app := newTestAppWith(t, appOpts{demoMode: true})
+
+	req, _ := http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/demo", nil)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.Equal(t, app.url+"/transactions", resp.Header.Get("Location"))
+	authCookie := findCookie(resp.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+	require.WithinDuration(t, time.Now().Add(demoDuration), authCookie.Expires, 5*time.Second)
+
+	req, _ = http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err = app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var me map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&me))
+	require.Equal(t, true, me["is_demo"])
+	require.Equal(t, false, me["enable_banking_available"])
+
+	var transactions, postings, busiestDay, accounts int
+	require.NoError(t, app.d.Users.QueryRow(`
+		select
+			(select count(*) from transactions where owner_user_id = $1),
+			(select count(*) from postings posting
+			 join transactions transaction on transaction.id = posting.transaction_id
+			 where transaction.owner_user_id = $1),
+			(select max(count)
+			 from (
+				select count(*)
+				from transactions
+				where owner_user_id = $1
+				group by occurred_on
+			 ) daily),
+			(select count(distinct bucket.id)
+			 from buckets bucket
+			 where bucket.owner_user_id = $1
+			   and bucket.kind in ('asset', 'liability')
+			   and not bucket.hidden)
+	`, me["id"]).Scan(&transactions, &postings, &busiestDay, &accounts))
+	require.GreaterOrEqual(t, transactions, 100)
+	require.Equal(t, transactions*2, postings)
+	require.GreaterOrEqual(t, busiestDay, 3)
+	require.Equal(t, 2, accounts)
+}
+
+func TestDemoLoginRateLimitsConfiguredClientIPHeader(t *testing.T) {
+	app := newTestAppWith(t, appOpts{
+		demoMode:       true,
+		clientIPHeader: "X-Forwarded-For",
+	})
+
+	for range 5 {
+		req, _ := http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/demo", nil)
+		req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
+		resp, err := app.client.Do(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/demo", nil)
+	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	require.Equal(t, "60", resp.Header.Get("Retry-After"))
+
+	req, _ = http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/demo", nil)
+	resp, err = app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestDemoLoginCanBeDisabled(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	req, _ := http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/demo", nil)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestOIDCFullFlow(t *testing.T) {

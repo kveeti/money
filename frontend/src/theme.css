@@ -40,6 +40,15 @@
   --success-solid-hover: var(--color-green-550);
   --success-fg: var(--color-green-700);
   --success-visual: var(--color-green-350);
+
+  --demo-surface: oklch(94% 0.035 250deg);
+  --demo-surface-hover: oklch(91% 0.05 250deg);
+  --demo-border: oklch(76% 0.08 250deg);
+  --demo-solid: oklch(55% 0.13 250deg);
+  --demo-solid-hover: oklch(59% 0.14 250deg);
+  --demo-fg: oklch(43% 0.12 250deg);
+  --demo-focus: oklch(55% 0.13 250deg);
+
   --stats-bar-visual: var(--color-gray-250);
 }
 
@@ -82,6 +91,14 @@
     --success-solid-hover: oklch(55% 0.145 150deg);
     --success-fg: oklch(75% 0.14 150deg);
     --success-visual: oklch(58% 0.14 150deg);
+
+    --demo-surface: oklch(24% 0.035 250deg);
+    --demo-surface-hover: oklch(29% 0.05 250deg);
+    --demo-border: oklch(42% 0.075 250deg);
+    --demo-solid: oklch(58% 0.13 250deg);
+    --demo-solid-hover: oklch(62% 0.14 250deg);
+    --demo-fg: oklch(78% 0.09 250deg);
+    --demo-focus: oklch(66% 0.12 250deg);
   }
 }
 
@@ -144,6 +161,14 @@
   --color-success-solid-hover: var(--success-solid-hover);
   --color-success-fg: var(--success-fg);
   --color-success-visual: var(--success-visual);
+
+  --color-demo-surface: var(--demo-surface);
+  --color-demo-surface-hover: var(--demo-surface-hover);
+  --color-demo-border: var(--demo-border);
+  --color-demo-solid: var(--demo-solid);
+  --color-demo-solid-hover: var(--demo-solid-hover);
+  --color-demo-fg: var(--demo-fg);
+  --color-demo-focus: var(--demo-focus);
 
   --color-gray-0: var(--gray-0);
   --color-gray-5: var(--gray-5);

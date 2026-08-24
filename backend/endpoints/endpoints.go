@@ -21,6 +21,7 @@ import (
 func GetRouter(state *state.State, dist fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("POST /api/v1/auth/demo", NewHandler(HandleDemoLogin(state)))
 	mux.HandleFunc("GET /api/v1/auth/login", NewHandler(HandleLogin(state)))
 	mux.HandleFunc("GET /api/v1/auth/callback", NewHandler(HandleCallback(state)))
 	mux.HandleFunc("POST /api/v1/auth/logout", NewHandler(HandleLogout(state)))

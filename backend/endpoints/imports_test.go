@@ -423,6 +423,17 @@ func TestImportWorkersOnlyReclaimExpiredLeases(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func markImportUserAsDemo(t *testing.T, app *testApp, userID string) {
+	t.Helper()
+	_, err := app.d.Users.Exec(`
+		update users
+		set is_demo = true,
+		    demo_expires_at = now() + interval '30 minutes'
+		where id = $1
+	`, userID)
+	require.NoError(t, err)
+}
+
 func TestImportRejectsWhenUserHasTooManyActiveImports(t *testing.T) {
 	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
 	bank := createBucket(t, app, "asset", "Bank")
@@ -449,6 +460,42 @@ func TestImportRejectsHourlyLimit(t *testing.T) {
 		_, err := app.d.Users.Exec(`
 			insert into import_batches (id, user_id, bucket_id, source, filename, created_at, status)
 			values ($1, $2, $3, 'csv', 'recent.csv', now(), 'done')
+		`, data.NewPrivateID(), userID, bank)
+		require.NoError(t, err)
+	}
+
+	resp := importCSV(t, app, bank, nordeaHeader+nordeaRow("2026/07/01", "-1,00", "A", "a"))
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+}
+
+func TestDemoImportRejectsSecondActiveImport(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	var userID string
+	require.NoError(t, app.d.Users.QueryRow("select owner_user_id from buckets where id=$1", bank).Scan(&userID))
+	markImportUserAsDemo(t, app, userID)
+
+	_, err := app.d.Users.Exec(`
+		insert into import_batches (id, user_id, bucket_id, source, filename, created_at, status)
+		values ($1, $2, $3, 'csv', 'held.csv', now(), 'processing')
+	`, data.NewPrivateID(), userID, bank)
+	require.NoError(t, err)
+
+	resp := importCSV(t, app, bank, nordeaHeader+nordeaRow("2026/07/01", "-1,00", "A", "a"))
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+}
+
+func TestDemoImportRejectsFourthImport(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	var userID string
+	require.NoError(t, app.d.Users.QueryRow("select owner_user_id from buckets where id=$1", bank).Scan(&userID))
+	markImportUserAsDemo(t, app, userID)
+
+	for range data.MaxDemoCSVImports {
+		_, err := app.d.Users.Exec(`
+			insert into import_batches (id, user_id, bucket_id, source, filename, created_at, status)
+			values ($1, $2, $3, 'csv', 'done.csv', now(), 'done')
 		`, data.NewPrivateID(), userID, bank)
 		require.NoError(t, err)
 	}

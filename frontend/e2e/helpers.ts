@@ -9,6 +9,7 @@ export function nordeaRow(date: string, amount: string, payee: string) {
 
 export async function login(page: Page, testInfo: TestInfo, subject?: string) {
   await page.goto("/");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Pick a dev user" }),
   ).toBeVisible();

@@ -4,6 +4,7 @@ test("built frontend loads through the backend and serves client routes", async 
   page,
 }, testInfo) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Pick a dev user" }),
   ).toBeVisible();

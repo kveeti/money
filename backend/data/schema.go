@@ -23,10 +23,18 @@ var importLimitsMigration string
 //go:embed migrations/003_maintenance.sql
 var maintenanceMigration string
 
+//go:embed migrations/004_demo_users.sql
+var demoUsersMigration string
+
+//go:embed migrations/005_demo_rate_limits.sql
+var demoRateLimitsMigration string
+
 var migrations = []migration{
 	{version: 1, sql: initialMigration},
 	{version: 2, sql: importLimitsMigration},
 	{version: 3, sql: maintenanceMigration},
+	{version: 4, sql: demoUsersMigration},
+	{version: 5, sql: demoRateLimitsMigration},
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) (err error) {

@@ -12,6 +12,10 @@ import (
 // setRequired sets every mandatory env var to a valid value for the test scope.
 func setRequired(t *testing.T) {
 	t.Setenv("IS_PROD", "0")
+	t.Setenv("DEMO_MODE", "0")
+	t.Setenv("CLIENT_IP_HEADER", "")
+	t.Setenv("DEMO_RATE_LIMIT_PER_MINUTE", "")
+	t.Setenv("DEMO_RATE_LIMIT_PER_HOUR", "")
 	t.Setenv("BACKEND_URL", "http://localhost:8000")
 	t.Setenv("DB_URL", "postgres://localhost/db")
 	t.Setenv("OIDC_ISSUER", "https://issuer.example")
@@ -25,6 +29,41 @@ func setRequired(t *testing.T) {
 	t.Setenv("ENABLEBANKING_PRIVATE_KEY", "")
 	t.Setenv("ENABLEBANKING_API_ORIGIN", "")
 	t.Setenv("ENABLEBANKING_ALLOWED_OIDC_SUBJECTS", "")
+}
+
+func TestLoadConfigClientIPRateLimit(t *testing.T) {
+	setRequired(t)
+	t.Setenv("CLIENT_IP_HEADER", "x-forwarded-for")
+	t.Setenv("DEMO_RATE_LIMIT_PER_MINUTE", "7")
+	t.Setenv("DEMO_RATE_LIMIT_PER_HOUR", "42")
+
+	c, err := LoadConfig()
+	require.NoError(t, err)
+	require.Equal(t, "X-Forwarded-For", c.ClientIPHeader)
+	require.Equal(t, 7, c.DemoRateLimitPerMinute)
+	require.Equal(t, 42, c.DemoRateLimitPerHour)
+
+	t.Setenv("CLIENT_IP_HEADER", "not a header")
+	_, err = LoadConfig()
+	require.ErrorContains(t, err, "CLIENT_IP_HEADER")
+
+	setRequired(t)
+	t.Setenv("DEMO_RATE_LIMIT_PER_MINUTE", "0")
+	_, err = LoadConfig()
+	require.ErrorContains(t, err, "DEMO_RATE_LIMIT_PER_MINUTE")
+}
+
+func TestLoadConfigDemoMode(t *testing.T) {
+	setRequired(t)
+	t.Setenv("DEMO_MODE", "1")
+
+	c, err := LoadConfig()
+	require.NoError(t, err)
+	require.True(t, c.DemoMode)
+
+	t.Setenv("DEMO_MODE", "true")
+	_, err = LoadConfig()
+	require.ErrorContains(t, err, "DEMO_MODE must be 0 or 1")
 }
 
 func TestLoadConfig_RedirectURLDefaultsToBackend(t *testing.T) {

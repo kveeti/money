@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	MaxActiveCSVImports = 3
-	MaxHourlyCSVImports = 10
+	MaxActiveCSVImports     = 3
+	MaxHourlyCSVImports     = 10
+	MaxActiveDemoCSVImports = 1
+	MaxDemoCSVImports       = 3
 )
 
 var (
@@ -92,9 +94,10 @@ func (d *Data) CreateImport(ctx context.Context, userID, bucketID, source, filen
 	// Serialize quota checks for one user so parallel requests cannot all pass the
 	// same count and exceed the limit.
 	var lockedUser string
+	var demoUser bool
 	if err := tx.QueryRowContext(ctx, `
-		select id from users where id = $1 for update
-	`, userID).Scan(&lockedUser); err != nil {
+		select id, is_demo from users where id = $1 for update
+	`, userID).Scan(&lockedUser, &demoUser); err != nil {
 		return nil, err
 	}
 
@@ -123,7 +126,11 @@ func (d *Data) CreateImport(ctx context.Context, userID, bucketID, source, filen
 	if !validBucket {
 		return nil, ErrImportBucket
 	}
-	if source == "csv" && (active >= MaxActiveCSVImports || recent >= MaxHourlyCSVImports) {
+	maxActive, maxRecent := MaxActiveCSVImports, MaxHourlyCSVImports
+	if demoUser {
+		maxActive, maxRecent = MaxActiveDemoCSVImports, MaxDemoCSVImports
+	}
+	if source == "csv" && (active >= maxActive || recent >= maxRecent) {
 		return nil, ErrImportLimit
 	}
 

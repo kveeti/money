@@ -16,21 +16,33 @@ func NewUsers(s *sql.DB) *Users {
 }
 
 type User struct {
-	ID           string
-	Subject      string
-	Issuer       string
-	Email        string
-	HomeCurrency string
-	CreatedAt    time.Time
+	ID            string
+	Subject       string
+	Issuer        string
+	Email         string
+	HomeCurrency  string
+	CreatedAt     time.Time
+	IsDemo        bool
+	DemoExpiresAt *time.Time
+}
+
+type userQueryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 // CreateUser inserts a new user and both required system buckets atomically.
 func (d *Data) CreateUser(ctx context.Context, user User) error {
+	return createUser(ctx, d.db, user)
+}
+
+func createUser(ctx context.Context, db userQueryRower, user User) error {
 	var users, buckets, audits int
-	err := d.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		with inserted_user as (
-			insert into users (id, subject, issuer, email, created_at)
-			values ($1, $2, $3, $4, $5)
+			insert into users (
+				id, subject, issuer, email, created_at, is_demo, demo_expires_at
+			)
+			values ($1, $2, $3, $4, $5, $6, $7)
 			returning id
 		), system_buckets(id, kind, name) as (
 			values
@@ -70,6 +82,8 @@ func (d *Data) CreateUser(ctx context.Context, user User) error {
 		user.Issuer,
 		user.Email,
 		user.CreatedAt.UTC(),
+		user.IsDemo,
+		user.DemoExpiresAt,
 	).Scan(&users, &buckets, &audits)
 	if err != nil {
 		return err
@@ -82,7 +96,8 @@ func (d *Data) CreateUser(ctx context.Context, user User) error {
 
 func (s *Users) GetUserByID(ctx context.Context, userID string) (*User, error) {
 	return s.scanUser(s.QueryRowContext(ctx, `
-		select id, subject, issuer, email, home_currency, created_at
+		select id, subject, issuer, email, home_currency, created_at,
+		       is_demo, demo_expires_at
 		from users
 		where id = $1
 		limit 1
@@ -92,7 +107,8 @@ func (s *Users) GetUserByID(ctx context.Context, userID string) (*User, error) {
 // GetUserBySubject looks up a user by their OIDC issuer + subject identifier.
 func (s *Users) GetUserBySubject(ctx context.Context, issuer, subject string) (*User, error) {
 	return s.scanUser(s.QueryRowContext(ctx, `
-		select id, subject, issuer, email, home_currency, created_at
+		select id, subject, issuer, email, home_currency, created_at,
+		       is_demo, demo_expires_at
 		from users
 		where issuer = $1
 		  and subject = $2
@@ -103,7 +119,10 @@ func (s *Users) GetUserBySubject(ctx context.Context, issuer, subject string) (*
 func (s *Users) scanUser(row *sql.Row) (*User, error) {
 	var user User
 
-	err := row.Scan(&user.ID, &user.Subject, &user.Issuer, &user.Email, &user.HomeCurrency, &user.CreatedAt)
+	err := row.Scan(
+		&user.ID, &user.Subject, &user.Issuer, &user.Email,
+		&user.HomeCurrency, &user.CreatedAt, &user.IsDemo, &user.DemoExpiresAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

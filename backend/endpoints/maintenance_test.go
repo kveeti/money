@@ -20,6 +20,67 @@ func TestHealthChecksDatabase(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 }
 
+func TestMaintenanceDeletesExpiredDemoAccounts(t *testing.T) {
+	d := newTestData(t)
+	expiresAt := time.Now().Add(-time.Minute)
+	userID := data.NewPrivateID()
+	require.NoError(t, d.CreateDemoUser(t.Context(), data.User{
+		ID:            userID,
+		Subject:       userID,
+		Issuer:        "demo",
+		Email:         "demo@demo.invalid",
+		CreatedAt:     time.Now().Add(-31 * time.Minute),
+		IsDemo:        true,
+		DemoExpiresAt: &expiresAt,
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.StartMaintenance(ctx)
+	require.Eventually(t, func() bool {
+		var users, transactions int
+		err := d.Users.QueryRow(`
+			select
+				(select count(*) from users where id = $1),
+				(select count(*) from transactions where owner_user_id = $1)
+		`, userID).Scan(&users, &transactions)
+		return err == nil && users == 0 && transactions == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestMaintenanceDeletesExpiredDemosInBatches(t *testing.T) {
+	d := newTestData(t)
+	_, err := d.Users.Exec(`
+		insert into users (
+			id, subject, issuer, email, created_at, is_demo, demo_expires_at
+		)
+		select
+			uuidv7(), 'batched-demo-' || sequence, 'demo',
+			'demo@demo.invalid', now() - interval '31 minutes', true,
+			now() - interval '1 minute'
+		from generate_series(1, 101) sequence
+	`)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d.StartMaintenance(ctx)
+	require.Eventually(t, func() bool {
+		var users int
+		err := d.Users.QueryRow(`select count(*) from users where is_demo`).Scan(&users)
+		return err == nil && users == 1
+	}, time.Second, 10*time.Millisecond)
+	cancel()
+
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	d.StartMaintenance(ctx)
+	require.Eventually(t, func() bool {
+		var users int
+		err := d.Users.QueryRow(`select count(*) from users where is_demo`).Scan(&users)
+		return err == nil && users == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestDatabasePoolIsBounded(t *testing.T) {
 	d := newTestData(t)
 	require.Equal(t, 20, d.Users.DB.Stats().MaxOpenConnections)

@@ -43,7 +43,43 @@ func TestFrontendGateRedirectsUnauthenticated(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, http.StatusFound, resp.StatusCode)
-	require.Equal(t, "/api/v1/auth/login", resp.Header.Get("Location"))
+	require.Equal(t, "/login", resp.Header.Get("Location"))
+}
+
+func TestFrontendGateIncludesDemoModeInLoginURL(t *testing.T) {
+	app := newTestAppWith(t, appOpts{demoMode: true})
+
+	req, _ := http.NewRequest(http.MethodGet, app.url+"/", nil)
+	req.Header.Set("Accept", "text/html")
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+	require.Equal(t, "/login?demo=1", resp.Header.Get("Location"))
+
+	req, _ = http.NewRequest(http.MethodGet, app.url+"/login", nil)
+	req.Header.Set("Accept", "text/html")
+	resp, err = app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+	require.Equal(t, "/login?demo=1", resp.Header.Get("Location"))
+
+	req, _ = http.NewRequest(http.MethodGet, app.url+"/login?demo=1", nil)
+	req.Header.Set("Accept", "text/html")
+	resp, err = app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestLoginPageIsPublic(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+
+	req, _ := http.NewRequest(http.MethodGet, app.url+"/login", nil)
+	req.Header.Set("Accept", "text/html")
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	require.Contains(t, string(body), "<!doctype html>")
 }
 
 // A session-bearing navigation is served the app shell.

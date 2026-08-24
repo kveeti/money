@@ -1,6 +1,12 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 
-export type ButtonVariant = "primary" | "outline" | "ghost" | "destructive";
+export type ButtonVariant =
+  | "primary"
+  | "outline"
+  | "ghost"
+  | "destructive"
+  | "demo"
+  | "demoOutline";
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
 }
@@ -12,6 +18,9 @@ const variants = {
   ghost: "bg-transparent text-gray-900 hover:not-disabled:bg-gray-200",
   destructive:
     "border-danger-border bg-danger-surface text-danger-fg hover:not-disabled:bg-danger-surface-hover focus-visible:outline-danger-focus focus-visible:outline-offset-2",
+  demo: "border-demo-solid bg-demo-solid text-white shadow-[inset_0_1px_0_rgb(255_255_255_/_0.18),0_2px_4px_rgb(0_0_0_/_0.12)] hover:not-disabled:border-demo-solid-hover hover:not-disabled:bg-demo-solid-hover focus-visible:outline-demo-focus focus-visible:outline-offset-2",
+  demoOutline:
+    "border-demo-border bg-demo-surface text-demo-fg hover:not-disabled:bg-demo-surface-hover focus-visible:outline-demo-focus focus-visible:outline-offset-2",
 };
 export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
   { variant = "primary", className, ...rest },

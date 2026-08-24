@@ -24,6 +24,7 @@ func HandleGetMe(state *state.State, getUserID GetUserID) Handler {
 			"id":                       user.ID,
 			"email":                    user.Email,
 			"home_currency":            user.HomeCurrency,
+			"is_demo":                  user.IsDemo,
 			"enable_banking_available": state.Config.EnableBanking.Enabled() && state.Config.EnableBanking.AllowsSubject(user.Subject),
 		})
 		return nil
