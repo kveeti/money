@@ -16,13 +16,18 @@ type Data struct {
 	importKick chan struct{}
 }
 
-// NewData connects to Postgres, applies the schema, and selects the import file
+// NewData connects to Postgres, applies migrations, and selects the import file
 // store: "disk" (under importDir) or Postgres bytea (default). importDir is only
 // read for the disk store.
 func NewData(ctx context.Context, dbUrl, importStore, importDir string) (*Data, error) {
 	db, err := connectPostgres(ctx, dbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to postgres: %w", err)
+	}
+
+	if err := applyMigrations(ctx, db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("error applying migrations: %w", err)
 	}
 
 	var files FileStore
@@ -56,10 +61,6 @@ func connectPostgres(ctx context.Context, dbURL string) (*sql.DB, error) {
 
 	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("error pinging database: %w", err)
-	}
-
-	if err := applySchema(ctx, db); err != nil {
-		return nil, fmt.Errorf("error applying schema: %w", err)
 	}
 
 	return db, nil
