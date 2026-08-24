@@ -19,8 +19,11 @@ const (
 	importRequestTimeout = 5 * time.Minute
 )
 
+const maxConcurrentUploads = 2
+
 // maxImportBytes caps the upload body; a var so tests can lower it.
-var maxImportBytes int64 = 64 << 20
+var maxImportBytes int64 = 10 << 20
+var importUploadSlots = make(chan struct{}, maxConcurrentUploads)
 
 func mapImportErr(err error) error {
 	switch {
@@ -28,6 +31,8 @@ func mapImportErr(err error) error {
 		return NewErr(err.Error(), http.StatusNotFound)
 	case errors.Is(err, data.ErrImportBucket), errors.Is(err, data.ErrNotDuplicate):
 		return NewErr(err.Error(), http.StatusBadRequest)
+	case errors.Is(err, data.ErrImportLimit):
+		return NewErr(err.Error(), http.StatusTooManyRequests)
 	default:
 		return NewUnexpectedErr("import error: %w", err)
 	}
@@ -50,6 +55,13 @@ func HandleCreateImport(state *state.State, getUserID GetUserID) Handler {
 		userID, err := getUserID(r)
 		if err != nil {
 			return err
+		}
+
+		select {
+		case importUploadSlots <- struct{}{}:
+			defer func() { <-importUploadSlots }()
+		default:
+			return NewErr("too many uploads; try again later", http.StatusTooManyRequests)
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
@@ -162,15 +174,16 @@ func HandleGetImport(state *state.State, getUserID GetUserID) Handler {
 			parseErrors = json.RawMessage("[]")
 		}
 		Json(w, JSON{
-			"id":           batch.ID,
-			"bucket_id":    batch.BucketID,
-			"filename":     batch.Filename,
-			"created_at":   batch.CreatedAt,
-			"status":       batch.Status,
-			"error":        batch.Error,
-			"imported":     batch.Imported,
-			"duplicates":   batch.Duplicates,
-			"parse_errors": parseErrors,
+			"id":                batch.ID,
+			"bucket_id":         batch.BucketID,
+			"filename":          batch.Filename,
+			"created_at":        batch.CreatedAt,
+			"status":            batch.Status,
+			"error":             batch.Error,
+			"imported":          batch.Imported,
+			"duplicates":        batch.Duplicates,
+			"parse_errors":      parseErrors,
+			"parse_error_count": batch.ParseErrorCount,
 		})
 		return nil
 	}

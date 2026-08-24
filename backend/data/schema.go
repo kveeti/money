@@ -17,8 +17,12 @@ type migration struct {
 //go:embed migrations/001_initial.sql
 var initialMigration string
 
+//go:embed migrations/002_import_limits.sql
+var importLimitsMigration string
+
 var migrations = []migration{
 	{version: 1, sql: initialMigration},
+	{version: 2, sql: importLimitsMigration},
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) (err error) {

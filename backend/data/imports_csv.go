@@ -83,9 +83,10 @@ func (d *Data) importCSV(ctx context.Context, batch ImportBatch, parser *Generic
 			update import_batches
 			set status = 'done',
 			    error = null,
-			    parse_errors = $2::jsonb
+			    parse_errors = $2::jsonb,
+			    parse_error_count = $3
 			where id = $1
-		`, batch.ID, parseErrors); err != nil {
+		`, batch.ID, parseErrors, parser.ErrorCount()); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -139,7 +140,7 @@ func (d *Data) processNextCSVImport(ctx context.Context) (bool, error) {
 	}
 	start := time.Now()
 
-	added, duplicates, parseErrors, err := d.importCSVWithRetry(ctx, batch)
+	added, duplicates, parseErrors, parseErrorCount, err := d.importCSVWithRetry(ctx, batch)
 	if err != nil {
 		slog.Error("CSV import failed", "batch", batch.ID, "took", time.Since(start), "err", err)
 		d.failCSVImport(ctx, batch.ID, err)
@@ -150,39 +151,40 @@ func (d *Data) processNextCSVImport(ctx context.Context) (bool, error) {
 		slog.Error("import blob delete failed", "batch", batch.ID, "err", err)
 	}
 	slog.Info("CSV import done", "batch", batch.ID, "added", added,
-		"duplicates", duplicates, "parse_errors", len(parseErrors), "took", time.Since(start))
+		"duplicates", duplicates, "parse_errors", parseErrorCount,
+		"stored_parse_errors", len(parseErrors), "took", time.Since(start))
 	return true, nil
 }
 
-func (d *Data) importCSVWithRetry(ctx context.Context, batch ImportBatch) (int, int, []RowError, error) {
+func (d *Data) importCSVWithRetry(ctx context.Context, batch ImportBatch) (int, int, []RowError, int, error) {
 	if batch.Source != "csv" {
-		return 0, 0, nil, fmt.Errorf("unsupported file import source %q", batch.Source)
+		return 0, 0, nil, 0, fmt.Errorf("unsupported file import source %q", batch.Source)
 	}
 	currencies, err := d.CurrencyExponents(ctx)
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, 0, err
 	}
 
 	var lastErr error
 	for attempt := 0; attempt < importMaxAttempts; attempt++ {
 		file, err := d.files.Open(ctx, batch.ID)
 		if err != nil {
-			return 0, 0, nil, err
+			return 0, 0, nil, 0, err
 		}
 		parser := NewGenericCSVParser(file, currencies)
 		added, duplicates, err := d.importCSV(ctx, batch, parser)
 		file.Close()
 		if err == nil {
-			return added, duplicates, parser.Errors(), nil
+			return added, duplicates, parser.Errors(), parser.ErrorCount(), nil
 		}
 		lastErr = err
 		if ctx.Err() != nil {
-			return 0, 0, nil, ctx.Err()
+			return 0, 0, nil, 0, ctx.Err()
 		}
 		slog.Warn("CSV import failed, retrying", "batch", batch.ID, "attempt", attempt+1, "err", err)
 		time.Sleep(importBackoff)
 	}
-	return 0, 0, nil, lastErr
+	return 0, 0, nil, 0, lastErr
 }
 
 func (d *Data) failCSVImport(ctx context.Context, batchID string, cause error) {

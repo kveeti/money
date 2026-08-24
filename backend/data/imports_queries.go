@@ -66,6 +66,7 @@ func (d *Data) GetImportStatus(ctx context.Context, userID, batchID string) (*Im
 			batch.status,
 			batch.error,
 			coalesce(batch.parse_errors, '[]'::jsonb),
+			batch.parse_error_count,
 			count(*) filter (where row.status <> 'duplicate'),
 			count(*) filter (where row.status = 'duplicate')
 		from import_batches batch
@@ -81,6 +82,7 @@ func (d *Data) GetImportStatus(ctx context.Context, userID, batchID string) (*Im
 		&batch.Status,
 		&batch.Error,
 		&batch.ParseErrors,
+		&batch.ParseErrorCount,
 		&batch.Imported,
 		&batch.Duplicates,
 	)
@@ -125,8 +127,20 @@ func (d *Data) ListDuplicates(ctx context.Context, userID, batchID, cursor strin
 		where row.batch_id = $1
 		  and batch.user_id = $2
 		  and row.status = 'duplicate'
-		  and ($3 = '' or row.id > $3::uuid)
-		order by row.id
+		  and (
+		    $3 = ''
+		    or (row.occurred_on, row.id) < (
+		      (
+		        select cursor_row.occurred_on
+		        from import_rows cursor_row
+		        where cursor_row.id = $3::uuid
+		          and cursor_row.batch_id = $1
+		          and cursor_row.status = 'duplicate'
+		      ),
+		      $3::uuid
+		    )
+		  )
+		order by row.occurred_on desc, row.id desc
 		limit $4
 	`, batchID, userID, cursor, limit)
 	if err != nil {

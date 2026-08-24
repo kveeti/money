@@ -36,8 +36,9 @@ export interface ImportBatchSummary {
   error?: string | null;
   imported: number;
   duplicates: number;
-  // Only the single-batch report populates this; the list omits it.
+  // Only the single-batch report populates these; the list omits them.
   parse_errors?: ParseError[];
+  parse_error_count?: number;
 }
 
 // The upload response: the file is stored durably and parsed/promoted in the

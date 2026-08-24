@@ -104,6 +104,13 @@ export default function ImportReportPage() {
       {data.parse_errors && data.parse_errors.length > 0 && (
         <section className="flex flex-col gap-2">
           <h2 className="text-base font-medium text-gray-700">Skipped rows</h2>
+          {(data.parse_error_count ?? data.parse_errors.length) >
+            data.parse_errors.length && (
+            <p className="m-0 text-base text-gray-700">
+              Showing the first {data.parse_errors.length} of{" "}
+              {data.parse_error_count} errors.
+            </p>
+          )}
           <div className="-mx-3 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 sm:-mx-6">
             <ul className="m-0 flex list-none flex-col p-0">
               {data.parse_errors.map((error, i) => (

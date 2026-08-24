@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInitialMigrationRunsOnce(t *testing.T) {
+func TestMigrationsRunOnce(t *testing.T) {
 	var logs bytes.Buffer
 	previousLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -21,15 +21,16 @@ func TestInitialMigrationRunsOnce(t *testing.T) {
 	d := newTestData(t)
 	require.Contains(t, logs.String(), `"msg":"applying database migration"`)
 	require.Contains(t, logs.String(), `"version":1`)
+	require.Contains(t, logs.String(), `"version":2`)
 	require.Contains(t, logs.String(), `"msg":"database migrations ready"`)
-	require.Contains(t, logs.String(), `"applied":1`)
+	require.Contains(t, logs.String(), `"applied":2`)
 
 	var database string
 	var appliedAt time.Time
 	require.NoError(t, d.Users.QueryRow(`
-		select current_database(), applied_at
+		select current_database(), max(applied_at)
 		from schema_migrations
-		where version = 1
+		group by current_database()
 	`).Scan(&database, &appliedAt))
 
 	dsn, err := dsnForDB(baseDSN, database)
@@ -48,8 +49,7 @@ func TestInitialMigrationRunsOnce(t *testing.T) {
 	require.NoError(t, second.Users.QueryRow(`
 		select count(*), max(applied_at)
 		from schema_migrations
-		where version = 1
 	`).Scan(&count, &reappliedAt))
-	require.Equal(t, 1, count)
+	require.Equal(t, 2, count)
 	require.Equal(t, appliedAt, reappliedAt)
 }

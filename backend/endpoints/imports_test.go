@@ -355,6 +355,20 @@ func TestImportCollectsRowErrors(t *testing.T) {
 	require.Equal(t, "invalid occurred_at: must be an RFC3339 UTC timestamp", rep.ParseErrors[1].Error)
 }
 
+func TestImportBoundsReportedRowErrors(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+
+	var csv strings.Builder
+	csv.WriteString(nordeaHeader)
+	for range data.MaxStoredRowErrors + 5 {
+		csv.WriteString("bad,,-1,EUR,,\n")
+	}
+	rep := doImport(t, app, bank, csv.String())
+	require.Len(t, rep.ParseErrors, data.MaxStoredRowErrors)
+	require.Equal(t, data.MaxStoredRowErrors+5, rep.ParseErrorCount)
+}
+
 func TestImportRejectsNonNordeaFile(t *testing.T) {
 	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
 	bank := createBucket(t, app, "asset", "Bank")
@@ -374,6 +388,54 @@ func TestImportRejectsOversizeFile(t *testing.T) {
 	body := nordeaHeader + strings.Repeat(nordeaRow("2026/07/01", "-1,00", "A", "a"), 40)
 	resp := importCSV(t, app, bank, body)
 	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
+func TestImportRejectsWhenUserHasTooManyActiveImports(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	var userID string
+	require.NoError(t, app.d.Users.QueryRow("select owner_user_id from buckets where id=$1", bank).Scan(&userID))
+	for range data.MaxActiveCSVImports {
+		_, err := app.d.Users.Exec(`
+			insert into import_batches (id, user_id, bucket_id, source, filename, created_at, status)
+			values ($1, $2, $3, 'csv', 'held.csv', now(), 'processing')
+		`, data.NewPrivateID(), userID, bank)
+		require.NoError(t, err)
+	}
+
+	resp := importCSV(t, app, bank, nordeaHeader+nordeaRow("2026/07/01", "-1,00", "A", "a"))
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+}
+
+func TestImportRejectsHourlyLimit(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	var userID string
+	require.NoError(t, app.d.Users.QueryRow("select owner_user_id from buckets where id=$1", bank).Scan(&userID))
+	for range data.MaxHourlyCSVImports {
+		_, err := app.d.Users.Exec(`
+			insert into import_batches (id, user_id, bucket_id, source, filename, created_at, status)
+			values ($1, $2, $3, 'csv', 'recent.csv', now(), 'done')
+		`, data.NewPrivateID(), userID, bank)
+		require.NoError(t, err)
+	}
+
+	resp := importCSV(t, app, bank, nordeaHeader+nordeaRow("2026/07/01", "-1,00", "A", "a"))
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+}
+
+func TestImportRejectsWhenUploadSlotsAreFull(t *testing.T) {
+	oldSlots := importUploadSlots
+	importUploadSlots = make(chan struct{}, maxConcurrentUploads)
+	for range maxConcurrentUploads {
+		importUploadSlots <- struct{}{}
+	}
+	defer func() { importUploadSlots = oldSlots }()
+
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	resp := importCSV(t, app, bank, nordeaHeader+nordeaRow("2026/07/01", "-1,00", "A", "a"))
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 }
 
 func TestImportRejectsBadBucket(t *testing.T) {
@@ -427,6 +489,7 @@ type batchReport struct {
 		Line  int    `json:"line"`
 		Error string `json:"error"`
 	} `json:"parse_errors"`
+	ParseErrorCount int `json:"parse_error_count"`
 }
 
 func getBatch(t *testing.T, app *testApp, id string) batchReport {
@@ -440,6 +503,7 @@ func getBatch(t *testing.T, app *testApp, id string) batchReport {
 
 type dupRow struct {
 	ID              string  `json:"id"`
+	Date            string  `json:"date"`
 	DuplicateOf     *string `json:"duplicate_of"`
 	DuplicateTarget *struct {
 		TransactionID *string `json:"transaction_id"`
@@ -475,6 +539,8 @@ func TestListDuplicatesPaginates(t *testing.T) {
 
 	p1 := getDuplicates(t, app, res.ID, "?limit=2")
 	require.Len(t, p1.Rows, 2)
+	require.Equal(t, "2026-07-03", p1.Rows[0].Date)
+	require.Equal(t, "2026-07-02", p1.Rows[1].Date)
 	require.NotNil(t, p1.NextCursor)
 	for _, r := range p1.Rows {
 		require.NotNil(t, r.DuplicateOf)
@@ -483,6 +549,7 @@ func TestListDuplicatesPaginates(t *testing.T) {
 
 	p2 := getDuplicates(t, app, res.ID, "?limit=2&cursor="+*p1.NextCursor)
 	require.Len(t, p2.Rows, 1)
+	require.Equal(t, "2026-07-01", p2.Rows[0].Date)
 	require.Nil(t, p2.NextCursor)
 
 	require.NotEqual(t, p1.Rows[0].ID, p2.Rows[0].ID)

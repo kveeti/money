@@ -401,9 +401,16 @@ func (d *Data) StageEnableBankingPage(ctx context.Context, job EnableBankingSync
 			}
 			if _, err := tx.Exec(ctx, `
 				update import_batches
-				set parse_errors = coalesce(parse_errors, '[]'::jsonb) || $2::jsonb
+				set parse_errors = (
+				        select coalesce(jsonb_agg(item.value order by item.ordinality), '[]'::jsonb)
+				        from jsonb_array_elements(
+				            coalesce(import_batches.parse_errors, '[]'::jsonb) || $2::jsonb
+				        ) with ordinality as item(value, ordinality)
+				        where item.ordinality <= $4
+				    ),
+				    parse_error_count = parse_error_count + $3
 				where id = $1
-			`, job.BatchID, string(encodedErrors)); err != nil {
+			`, job.BatchID, string(encodedErrors), len(rowErrors), MaxStoredRowErrors); err != nil {
 				return err
 			}
 		}

@@ -49,6 +49,7 @@ func TestGenericCSVCollectsInvalidRows(t *testing.T) {
 	require.False(t, parser.Next())
 	require.NoError(t, parser.Err())
 	require.Len(t, parser.Errors(), 2)
+	require.Equal(t, 2, parser.ErrorCount())
 	require.Equal(t, 2, parser.Errors()[0].Line)
 	require.Equal(t, 3, parser.Errors()[1].Line)
 }
@@ -70,15 +71,56 @@ func TestParseCanonicalAmountRejectsExcessPrecision(t *testing.T) {
 	currencies := map[string]int{"EUR": 2, "JPY": 0}
 
 	_, _, err := ParseCanonicalAmount("1.999", "EUR", currencies)
-	require.EqualError(t, err, "amount has more than 2 decimal places: 1.999")
+	require.EqualError(t, err, "amount has more than 2 decimal places")
 
 	_, _, err = ParseCanonicalAmount("1.5", "JPY", currencies)
-	require.EqualError(t, err, "amount has more than 0 decimal places: 1.5")
+	require.EqualError(t, err, "amount has more than 0 decimal places")
 
 	amount, currency, err := ParseCanonicalAmount("1.9", "EUR", currencies)
 	require.NoError(t, err)
 	require.Equal(t, int64(190), amount)
 	require.Equal(t, "EUR", currency)
+}
+
+func TestGenericCSVBoundsStoredErrors(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("date,occurred_at,amount,currency,counterparty,note\n")
+	for range MaxStoredRowErrors + 5 {
+		input.WriteString("bad,,-1,EUR,,\n")
+	}
+
+	parser := NewGenericCSVParser(strings.NewReader(input.String()), map[string]int{"EUR": 2})
+	require.False(t, parser.Next())
+	require.NoError(t, parser.Err())
+	require.Len(t, parser.Errors(), MaxStoredRowErrors)
+	require.Equal(t, MaxStoredRowErrors+5, parser.ErrorCount())
+}
+
+func TestGenericCSVRejectsTooManyRows(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("date,occurred_at,amount,currency,counterparty,note\n")
+	for range MaxGenericCSVRows + 1 {
+		input.WriteString("2026-01-01,,-1,EUR,,\n")
+	}
+
+	parser := NewGenericCSVParser(strings.NewReader(input.String()), map[string]int{"EUR": 2})
+	var rows int
+	for parser.Next() {
+		rows++
+	}
+	require.Equal(t, MaxGenericCSVRows, rows)
+	require.EqualError(t, parser.Err(), "CSV has more than 100000 rows")
+}
+
+func TestGenericCSVRejectsOversizeText(t *testing.T) {
+	columns := []string{"2026-01-01", "", "-1", "EUR", strings.Repeat("x", MaxImportTextBytes+1), ""}
+	_, err := parseGenericCSVRow(columns, map[string]int{"EUR": 2})
+	require.EqualError(t, err, "counterparty exceeds 4096 bytes")
+
+	columns[4] = ""
+	columns[5] = strings.Repeat("x", MaxImportTextBytes+1)
+	_, err = parseGenericCSVRow(columns, map[string]int{"EUR": 2})
+	require.EqualError(t, err, "note exceeds 4096 bytes")
 }
 
 func TestValidGenericCSVHeader(t *testing.T) {
