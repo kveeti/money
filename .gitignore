@@ -1,6 +1,7 @@
 .env
 .DS_Store
 .pg
+.certs/
 
 # built frontend, embedded into the backend binary
 backend/webdist/*

@@ -70,7 +70,7 @@
 
             export PGDATA="$PWD/.pg"
             export PORT="''${PORT:-8000}"
-            export DEVIDP_PORT="''${DEVIDP_PORT:-5557}"
+            export DEVIDP_PORT="$(free_port "''${DEVIDP_PORT:-5557}" "$PORT")"
             export VITE_PORT="$(free_port "''${VITE_PORT:-3000}" "$PORT" "$DEVIDP_PORT")"
 
             if pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then

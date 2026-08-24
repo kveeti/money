@@ -5,7 +5,7 @@ ifneq (,$(wildcard ./.env))
 endif
 endif
 
-.PHONY: all e2e
+.PHONY: all e2e httpsproxy httpsdev httpsdevi
 MAKEFLAGS += -j
 
 backdev:
@@ -19,6 +19,20 @@ frontdev:
 	@cd frontend && pnpm run dev
 
 dev: backdev frontdev
+
+# Local HTTPS for providers that require a secure callback. Trust
+# backend/.certs/localhost-cert.pem after its first run.
+httpsproxy:
+	@cd backend && go run ./tools/httpsproxy
+
+httpsdev: export BACKEND_URL=https://localhost:8443
+httpsdev: export VITE_HMR_CLIENT_PORT=8443
+httpsdev: httpsproxy backdev frontdev
+
+httpsdevi: export BACKEND_URL=https://localhost:8443
+httpsdevi: export VITE_HMR_CLIENT_PORT=8443
+httpsdevi: export OIDC_ISSUER=$(DEVIDP_ISSUER)
+httpsdevi: httpsproxy devidp backdev frontdev
 
 devi: export OIDC_ISSUER=$(DEVIDP_ISSUER)
 devi: devidp backdev frontdev
