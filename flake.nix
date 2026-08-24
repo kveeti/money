@@ -1,4 +1,6 @@
 {
+  description = "Money tracker";
+
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
@@ -11,18 +13,88 @@
         "aarch64-darwin"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      patchedGo =
+        pkgs:
+        pkgs.go.overrideAttrs (_: {
+          version = "1.26.6";
+          src = pkgs.fetchurl {
+            url = "https://go.dev/dl/go1.26.6.src.tar.gz";
+            hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
+          };
+        });
     in
     {
+      packages = forAllSystems (
+        pkgs:
+        let
+          frontend = pkgs.stdenv.mkDerivation (finalAttrs: {
+            pname = "money-frontend";
+            version = "0.0.1";
+            src = ./frontend;
+
+            pnpmDeps = pkgs.fetchPnpmDeps {
+              inherit (finalAttrs) pname version src;
+              pnpm = pkgs.pnpm_10;
+              fetcherVersion = 3;
+              hash = "sha256-raCssv83dQJozzDLporugZTqDyw6abJEkEgLfuGwx9s=";
+            };
+
+            nativeBuildInputs = [
+              pkgs.nodejs_24
+              pkgs.pnpm_10
+              pkgs.pnpmConfigHook
+            ];
+
+            buildPhase = ''
+              runHook preBuild
+              pnpm run build
+              runHook postBuild
+            '';
+
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out
+              cp -r ../backend/webdist/. $out/
+              runHook postInstall
+            '';
+          });
+
+          appSource = pkgs.runCommand "money-source" { } ''
+            cp -r ${./backend} $out
+            chmod -R u+w $out
+            rm -rf $out/webdist
+            cp -r ${frontend} $out/webdist
+          '';
+
+          app = (pkgs.buildGoModule.override { go = patchedGo pkgs; }) {
+            pname = "money";
+            version = "0.0.1";
+            src = appSource;
+            vendorHash = "sha256-12To+yaerrq78QhiOsfEFpdgna4VU9cW0Irj4kNJM6k=";
+            subPackages = [ "." ];
+            doCheck = false;
+
+            ldflags = [
+              "-s"
+              "-w"
+            ];
+
+            postInstall = ''
+              mv $out/bin/backend $out/bin/money
+            '';
+
+            meta.mainProgram = "money";
+          };
+        in
+        {
+          default = app;
+        }
+      );
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            (pkgs.go.overrideAttrs (_: {
-              version = "1.26.6";
-              src = pkgs.fetchurl {
-                url = "https://go.dev/dl/go1.26.6.src.tar.gz";
-                hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
-              };
-            }))
+            (patchedGo pkgs)
 
             pkgs.postgresql_18
             pkgs.openssl
@@ -121,5 +193,12 @@
           '';
         };
       });
+
+      nixosModules.default =
+        { pkgs, ... }@args:
+        let
+          moneyPkg = self.packages.${pkgs.system}.default;
+        in
+        import ./module.nix { inherit moneyPkg; } args;
     };
 }
