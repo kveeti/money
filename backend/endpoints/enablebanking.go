@@ -18,8 +18,8 @@ import (
 
 const (
 	enableBankingProvider = data.EnableBankingSource
-	ebStateCookie         = "dash_eb_state"
-	ebAttemptCookie       = "dash_eb_attempt"
+	ebStateCookie         = "money_eb_state"
+	ebAttemptCookie       = "money_eb_attempt"
 )
 
 type enableBankingData struct {

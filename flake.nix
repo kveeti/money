@@ -100,10 +100,10 @@
             export DB_URL="postgres://postgres:postgres@localhost:$PGPORT/postgres"
 
             if command -v dev-url >/dev/null 2>&1; then
-              dev-url dash-8000 "$PORT" >/dev/null
-              dev-url dash-oidc "$DEVIDP_PORT" >/dev/null
-              export BACKEND_URL="https://dash-8000.dev-internal.veetik.com"
-              export DEVIDP_ISSUER="https://dash-oidc.dev-internal.veetik.com"
+              dev-url money-8000 "$PORT" >/dev/null
+              dev-url money-oidc "$DEVIDP_PORT" >/dev/null
+              export BACKEND_URL="https://money-8000.dev-internal.veetik.com"
+              export DEVIDP_ISSUER="https://money-oidc.dev-internal.veetik.com"
               export VITE_HMR_CLIENT_PORT=443
             else
               export BACKEND_URL="http://localhost:$PORT"

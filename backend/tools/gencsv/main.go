@@ -1,4 +1,4 @@
-// Command gencsv generates large generic Dash CSV files for import load tests.
+// Command gencsv generates large generic Money CSV files for import load tests.
 package main
 
 import (

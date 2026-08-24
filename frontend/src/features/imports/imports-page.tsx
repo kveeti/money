@@ -38,7 +38,7 @@ function sampleCSV() {
 function downloadSampleCSV() {
   const link = document.createElement("a");
   link.href = `data:text/csv;charset=utf-8,${encodeURIComponent(sampleCSV())}`;
-  link.download = "dash-demo.csv";
+  link.download = "money-demo.csv";
   link.click();
 }
 
@@ -141,7 +141,7 @@ function ImportForm() {
             onClick={() =>
               setInput(form, {
                 path: ["file"],
-                input: new File([sampleCSV()], "dash-demo.csv", {
+                input: new File([sampleCSV()], "money-demo.csv", {
                   type: "text/csv",
                 }),
               })

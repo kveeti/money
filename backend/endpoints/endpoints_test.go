@@ -36,11 +36,11 @@ func TestNewHandlerLimitsJSONBody(t *testing.T) {
 }
 
 func TestOriginGuardRejectsUnsafeForeignRequests(t *testing.T) {
-	handler := OriginGuard("https://dash.example", "https://front.example")(
+	handler := OriginGuard("https://money.example", "https://front.example")(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
 	)
 
-	for _, origin := range []string{"https://dash.example", "https://front.example", ""} {
+	for _, origin := range []string{"https://money.example", "https://front.example", ""} {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/test", nil)
 		request.Header.Set("Origin", origin)
 		response := httptest.NewRecorder()

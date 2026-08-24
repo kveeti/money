@@ -1,4 +1,4 @@
-// Command convertcsv converts OP transaction CSV files to Dash's generic CSV format.
+// Command convertcsv converts OP transaction CSV files to Money's generic CSV format.
 package main
 
 import (
@@ -30,7 +30,7 @@ var amountPattern = regexp.MustCompile(`^-?\d+,\d{2}$`)
 
 func main() {
 	inPath := flag.String("in", "", "input OP CSV path (required)")
-	outPath := flag.String("out", "", "output Dash CSV path (required)")
+	outPath := flag.String("out", "", "output Money CSV path (required)")
 	flag.Parse()
 
 	if err := run(*inPath, *outPath); err != nil {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-database="dash_e2e_$$"
+database="money_e2e_$$"
 backend_port=8200
 idp_port=5758
 admin_url="postgres://postgres:postgres@127.0.0.1:5556/postgres"
@@ -23,7 +23,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$root/backend"
-  go build -o "$bin_dir/dash" .
+  go build -o "$bin_dir/money" .
   go build -o "$bin_dir/devidp" ./cmd/devidp
 )
 
@@ -56,14 +56,14 @@ IMPORT_STORE=postgres \
 DISABLE_RATE_SYNC=1 \
 DEMO_MODE=1 \
 OIDC_ISSUER="http://127.0.0.1:$idp_port" \
-OIDC_CLIENT_ID=dash \
-OIDC_CLIENT_SECRET=dash \
+OIDC_CLIENT_ID=money \
+OIDC_CLIENT_SECRET=money \
 OIDC_REDIRECT_URL= \
 ENABLEBANKING_APP_ID=e2e \
 ENABLEBANKING_PRIVATE_KEY="$bin_dir/enablebanking.pem" \
 ENABLEBANKING_ALLOWED_OIDC_SUBJECTS=e2e-bank-auth,e2e-bank-connections \
 IS_PROD=0 \
-"$bin_dir/dash" >"$bin_dir/backend.log" 2>&1 &
+"$bin_dir/money" >"$bin_dir/backend.log" 2>&1 &
 backend_pid=$!
 pids+=("$backend_pid")
 

@@ -45,7 +45,7 @@ e2e:
 
 # Builds the frontend into backend/webdist, then the backend binary with it embedded.
 build: build-frontend
-	@cd backend && go build -o ../dist/dash .
+	@cd backend && go build -o ../dist/money .
 
 # Generate a Nordea-format test CSV for load-testing the importer (written beside the Makefile).
 # Override params: make gencsv N=200000 O=big.csv DUP=0.1

@@ -26,7 +26,7 @@ test("demo login opens a seeded account and offers a sample import", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Use sample CSV" }).click();
-  await expect(page.getByText("dash-demo.csv", { exact: true })).toBeVisible();
+  await expect(page.getByText("money-demo.csv", { exact: true })).toBeVisible();
   await page
     .getByRole("combobox")
     .filter({ hasText: "Select account" })
