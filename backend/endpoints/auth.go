@@ -41,7 +41,7 @@ func HandleLogin(st *state.State) Handler {
 			return NewUnexpectedErr("error encoding flow state: %w", err)
 		}
 
-		http.SetCookie(w, auth.CreateFlowCookie(base64.RawURLEncoding.EncodeToString(flow), st.Config.IsProd))
+		http.SetCookie(w, auth.CreateFlowCookie(base64.RawURLEncoding.EncodeToString(flow), st.Config.SecureCookies()))
 		http.Redirect(w, r, st.OIDC.AuthCodeURL(stateTok, nonce, verifier), http.StatusFound)
 		return nil
 	}
@@ -98,7 +98,7 @@ func HandleCallback(st *state.State) Handler {
 			return err
 		}
 
-		http.SetCookie(w, auth.ClearFlowCookie(st.Config.IsProd))
+		http.SetCookie(w, auth.ClearFlowCookie(st.Config.SecureCookies()))
 		http.Redirect(w, r, st.Config.EffectiveFrontUrl(), http.StatusFound)
 		return nil
 	}
@@ -116,7 +116,7 @@ func HandleLogout(state *state.State) Handler {
 		}
 
 		expired := time.Unix(0, 0)
-		http.SetCookie(w, auth.CreateCookie("", &expired, state.Config.IsProd))
+		http.SetCookie(w, auth.CreateCookie("", &expired, state.Config.SecureCookies()))
 
 		Json(w, JSON{"ok": true})
 		return nil
@@ -146,6 +146,6 @@ func issueSession(w http.ResponseWriter, st *state.State, r *http.Request, userI
 		return NewUnexpectedErr("error inserting session: %w", err)
 	}
 
-	http.SetCookie(w, auth.CreateCookie(rawToken, &expiry, st.Config.IsProd))
+	http.SetCookie(w, auth.CreateCookie(rawToken, &expiry, st.Config.SecureCookies()))
 	return nil
 }

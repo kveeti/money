@@ -35,6 +35,39 @@ func TestNewHandlerLimitsJSONBody(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, response.Code)
 }
 
+func TestOriginGuardRejectsUnsafeForeignRequests(t *testing.T) {
+	handler := OriginGuard("https://dash.example", "https://front.example")(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+	)
+
+	for _, origin := range []string{"https://dash.example", "https://front.example", ""} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/test", nil)
+		request.Header.Set("Origin", origin)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		require.Equal(t, http.StatusNoContent, response.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/test", nil)
+	request.Header.Set("Origin", "https://evil.example")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusForbidden, response.Code)
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	handler := SecurityHeaders(true, true)(http.NotFoundHandler())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/@me", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
+	require.Equal(t, "DENY", response.Header().Get("X-Frame-Options"))
+	require.NotEmpty(t, response.Header().Get("Content-Security-Policy"))
+	require.NotEmpty(t, response.Header().Get("Strict-Transport-Security"))
+}
+
 func TestNewHandlerLeavesImportBodyLimitToImportHandler(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPost,

@@ -16,7 +16,13 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            pkgs.go
+            (pkgs.go.overrideAttrs (_: {
+              version = "1.26.6";
+              src = pkgs.fetchurl {
+                url = "https://go.dev/dl/go1.26.6.src.tar.gz";
+                hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
+              };
+            }))
 
             pkgs.postgresql_18
 

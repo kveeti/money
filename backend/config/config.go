@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -61,6 +63,11 @@ func (c *Config) EffectiveFrontUrl() string {
 	return c.BackendUrl
 }
 
+func (c *Config) SecureCookies() bool {
+	u, err := url.Parse(c.BackendUrl)
+	return err == nil && u.Scheme == "https"
+}
+
 func (c Config) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Bool("is_prod", c.IsProd),
@@ -94,13 +101,22 @@ func redact(value string) string {
 }
 
 func LoadConfig() (*Config, error) {
+	isProd := false
+	switch value := os.Getenv("IS_PROD"); value {
+	case "", "0":
+	case "1":
+		isProd = true
+	default:
+		return nil, fmt.Errorf("invalid config: IS_PROD must be 0 or 1")
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8000"
 	}
 
 	config := &Config{
-		IsProd:          os.Getenv("IS_PROD") == "1",
+		IsProd:          isProd,
 		Port:            port,
 		BackendUrl:      os.Getenv("BACKEND_URL"),
 		FrontUrl:        os.Getenv("FRONT_URL"),
@@ -142,10 +158,52 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid config: ENABLEBANKING_APP_ID and ENABLEBANKING_PRIVATE_KEY must be set together")
 	}
 
+	config.BackendUrl = strings.TrimSuffix(config.BackendUrl, "/")
+	config.FrontUrl = strings.TrimSuffix(config.FrontUrl, "/")
+	config.DevViteUrl = strings.TrimSuffix(config.DevViteUrl, "/")
+	config.EnableBanking.APIOrigin = strings.TrimSuffix(config.EnableBanking.APIOrigin, "/")
+
 	// OIDC_REDIRECT_URL defaults to the backend's own callback; set it
 	// explicitly only for non-standard setups (proxies, path rewrites, ...).
 	if config.OIDC.RedirectURL == "" {
 		config.OIDC.RedirectURL = config.BackendUrl + callbackPath
+	}
+
+	for name, value := range map[string]string{
+		"BACKEND_URL":              config.BackendUrl,
+		"OIDC_ISSUER":              config.OIDC.Issuer,
+		"OIDC_REDIRECT_URL":        config.OIDC.RedirectURL,
+		"FRONT_URL":                config.FrontUrl,
+		"DEV_VITE_URL":             config.DevViteUrl,
+		"ENABLEBANKING_API_ORIGIN": config.EnableBanking.APIOrigin,
+	} {
+		if value == "" && (name == "FRONT_URL" || name == "DEV_VITE_URL") {
+			continue
+		}
+		u, err := url.Parse(value)
+		if err != nil || u.Scheme == "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return nil, fmt.Errorf("invalid config: %s must be an absolute HTTP URL", name)
+		}
+		if config.IsProd && u.Scheme != "https" {
+			return nil, fmt.Errorf("invalid config: %s must use HTTPS in production", name)
+		}
+	}
+	for name, value := range map[string]string{
+		"BACKEND_URL":              config.BackendUrl,
+		"FRONT_URL":                config.FrontUrl,
+		"DEV_VITE_URL":             config.DevViteUrl,
+		"ENABLEBANKING_API_ORIGIN": config.EnableBanking.APIOrigin,
+	} {
+		if value == "" {
+			continue
+		}
+		u, _ := url.Parse(value)
+		if u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("invalid config: %s must be an origin without a path, query, or fragment", name)
+		}
+	}
+	if config.IsProd && config.DevViteUrl != "" {
+		return nil, fmt.Errorf("invalid config: DEV_VITE_URL cannot be set in production")
 	}
 
 	return config, nil

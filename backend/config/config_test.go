@@ -11,6 +11,7 @@ import (
 
 // setRequired sets every mandatory env var to a valid value for the test scope.
 func setRequired(t *testing.T) {
+	t.Setenv("IS_PROD", "0")
 	t.Setenv("BACKEND_URL", "http://localhost:8000")
 	t.Setenv("DB_URL", "postgres://localhost/db")
 	t.Setenv("OIDC_ISSUER", "https://issuer.example")
@@ -18,7 +19,11 @@ func setRequired(t *testing.T) {
 	t.Setenv("OIDC_CLIENT_SECRET", "secret")
 	// Optional vars default to empty.
 	t.Setenv("FRONT_URL", "")
+	t.Setenv("DEV_VITE_URL", "")
 	t.Setenv("OIDC_REDIRECT_URL", "")
+	t.Setenv("ENABLEBANKING_APP_ID", "")
+	t.Setenv("ENABLEBANKING_PRIVATE_KEY", "")
+	t.Setenv("ENABLEBANKING_API_ORIGIN", "")
 }
 
 func TestLoadConfig_RedirectURLDefaultsToBackend(t *testing.T) {
@@ -67,6 +72,55 @@ func TestLoadConfig_MissingRequiredErrors(t *testing.T) {
 			require.ErrorContains(t, err, missing)
 		})
 	}
+}
+
+func TestLoadConfigSecureCookiesFollowBackendURL(t *testing.T) {
+	setRequired(t)
+	c, err := LoadConfig()
+	require.NoError(t, err)
+	require.False(t, c.SecureCookies())
+
+	t.Setenv("BACKEND_URL", "https://dash.example/")
+	c, err = LoadConfig()
+	require.NoError(t, err)
+	require.Equal(t, "https://dash.example", c.BackendUrl)
+	require.True(t, c.SecureCookies())
+}
+
+func TestLoadConfigProductionRequiresHTTPS(t *testing.T) {
+	setRequired(t)
+	t.Setenv("IS_PROD", "1")
+
+	_, err := LoadConfig()
+	require.ErrorContains(t, err, "must use HTTPS in production")
+
+	t.Setenv("BACKEND_URL", "https://dash.example")
+	t.Setenv("OIDC_ISSUER", "https://issuer.example")
+	c, err := LoadConfig()
+	require.NoError(t, err)
+	require.True(t, c.IsProd)
+}
+
+func TestLoadConfigRejectsDevProxyInProduction(t *testing.T) {
+	setRequired(t)
+	t.Setenv("IS_PROD", "1")
+	t.Setenv("BACKEND_URL", "https://dash.example")
+	t.Setenv("DEV_VITE_URL", "https://vite.example")
+
+	_, err := LoadConfig()
+	require.ErrorContains(t, err, "DEV_VITE_URL cannot be set in production")
+}
+
+func TestLoadConfigRejectsInvalidProdFlagAndOrigins(t *testing.T) {
+	setRequired(t)
+	t.Setenv("IS_PROD", "true")
+	_, err := LoadConfig()
+	require.ErrorContains(t, err, "IS_PROD must be 0 or 1")
+
+	setRequired(t)
+	t.Setenv("BACKEND_URL", "https://dash.example/path")
+	_, err = LoadConfig()
+	require.ErrorContains(t, err, "must be an origin")
 }
 
 func TestConfigLogValueRedactsSensitiveValues(t *testing.T) {

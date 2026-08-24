@@ -82,10 +82,12 @@ func GetRouter(state *state.State, dist fs.FS) http.Handler {
 
 	// middleware chain (outermost first)
 	var handler http.Handler = mux
+	handler = OriginGuard(state.Config.BackendUrl, state.Config.FrontUrl)(handler)
 	// CORS is only needed when the frontend is served from a different origin.
 	if state.Config.FrontUrl != "" {
 		handler = Cors(state.Config.FrontUrl)(handler)
 	}
+	handler = SecurityHeaders(state.Config.IsProd, state.Config.SecureCookies())(handler)
 	handler = Logger(handler)
 	handler = RequestID(handler)
 
@@ -138,6 +140,47 @@ func Logger(next http.Handler) http.Handler {
 			slog.String("took", millis),
 		)
 	})
+}
+
+func SecurityHeaders(isProd, isHTTPS bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "same-origin")
+			w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+			if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+				w.Header().Set("Cache-Control", "no-store")
+			}
+			if isHTTPS {
+				w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+			}
+			if isProd {
+				w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; manifest-src 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func OriginGuard(origins ...string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(origins))
+	for _, origin := range origins {
+		if origin != "" {
+			allowed[strings.TrimSuffix(origin, "/")] = true
+		}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			unsafe := r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete
+			origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
+			if unsafe && origin != "" && !allowed[origin] {
+				http.Error(w, "invalid request origin", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func Cors(frontUrl string) func(http.Handler) http.Handler {

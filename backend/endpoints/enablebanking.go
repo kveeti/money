@@ -143,8 +143,8 @@ func HandleStartEnableBanking(s *state.State, getUserID GetUserID) Handler {
 			return NewUnexpectedErr("start Enable Banking authorization: %w", err)
 		}
 		encodedAttempt, _ := json.Marshal(attempt)
-		http.SetCookie(w, authCookie(ebStateCookie, stateValue, s.Config.IsProd))
-		http.SetCookie(w, authCookie(ebAttemptCookie, base64.RawURLEncoding.EncodeToString(encodedAttempt), s.Config.IsProd))
+		http.SetCookie(w, authCookie(ebStateCookie, stateValue, s.Config.SecureCookies()))
+		http.SetCookie(w, authCookie(ebAttemptCookie, base64.RawURLEncoding.EncodeToString(encodedAttempt), s.Config.SecureCookies()))
 		http.Redirect(w, r, authURL, http.StatusSeeOther)
 		return nil
 	}
@@ -223,7 +223,7 @@ func HandleEnableBankingCallback(s *state.State, getUserID GetUserID) Handler {
 				_ = client.DeleteSession(ctx, oldData.SessionID)
 			}
 		}
-		expireAuthCookies(w, s.Config.IsProd)
+		expireAuthCookies(w, s.Config.SecureCookies())
 		http.Redirect(w, r, "/connections", http.StatusSeeOther)
 		return nil
 	}

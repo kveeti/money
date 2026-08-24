@@ -192,13 +192,18 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	slog.InfoContext(ctx, "Enable Banking request", "method", method, "url", endpoint)
+	slog.InfoContext(ctx, "Enable Banking request", "method", method)
 	response, err := c.http.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "Enable Banking request failed", "method", method, "url", endpoint, "err", err)
-		return err
+		safeErr := err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			safeErr = urlErr.Err
+		}
+		slog.ErrorContext(ctx, "Enable Banking request failed", "method", method, "err", safeErr)
+		return fmt.Errorf("Enable Banking request failed: %w", safeErr)
 	}
-	slog.InfoContext(ctx, "Enable Banking response", "method", method, "url", endpoint, "status", response.StatusCode)
+	slog.InfoContext(ctx, "Enable Banking response", "method", method, "status", response.StatusCode)
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
 	if err != nil {
