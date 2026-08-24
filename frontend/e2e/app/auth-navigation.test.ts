@@ -5,7 +5,7 @@ import { login } from "../helpers";
 test("login, navigation, and command palette use the real app", async ({
   page,
 }, testInfo) => {
-  await login(page, testInfo);
+  await login(page, testInfo, "e2e-bank-auth");
 
   const nav = page.getByRole("navigation");
   await expect(

@@ -7,12 +7,13 @@ export function nordeaRow(date: string, amount: string, payee: string) {
   return `${date.replaceAll("/", "-")},,${amount.replace(",", ".")},EUR,${payee},\n`;
 }
 
-export async function login(page: Page, testInfo: TestInfo) {
+export async function login(page: Page, testInfo: TestInfo, subject?: string) {
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Pick a dev user" }),
   ).toBeVisible();
   const user =
+    subject ??
     `${testInfo.file.split("/").at(-1)}-${testInfo.title}-${Date.now()}`
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-");

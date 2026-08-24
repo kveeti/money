@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Redirect, Route, Router, Switch } from "wouter";
 
-import ConnectionsPage from "./features/connections/connections-page";
+import { ConnectionsRoute } from "./features/connections/connections-route";
 import DesignPage from "./features/design/design-page";
 import { I18n } from "./features/i18n/use-i18n";
 import { ImportDropProvider } from "./features/imports/import-drop";
@@ -35,7 +35,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/transactions" component={TransactionsPage} />
                 <Route path="/imports" component={ImportsPage} />
                 <Route path="/imports/:id" component={ImportReportPage} />
-                <Route path="/connections" component={ConnectionsPage} />
+                <Route path="/connections" component={ConnectionsRoute} />
                 <Route path="/stats" component={StatsPage} />
                 <Route path="/design" component={DesignPage} />
                 <Route>

@@ -5,6 +5,16 @@ test.use({ baseURL: "http://127.0.0.1:3001" });
 test("navigation menu tracks syncing across closes and reloads", async ({
   page,
 }) => {
+  await page.route("**/api/v1/users/@me", (route) =>
+    route.fulfill({
+      json: {
+        id: "user",
+        email: "user@example.com",
+        home_currency: "EUR",
+        enable_banking_available: true,
+      },
+    }),
+  );
   await page.route("**/api/v1/currencies", (route) =>
     route.fulfill({ json: [{ code: "EUR", exponent: 2 }] }),
   );

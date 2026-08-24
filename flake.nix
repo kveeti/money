@@ -25,6 +25,7 @@
             }))
 
             pkgs.postgresql_18
+            pkgs.openssl
 
             pkgs.nodejs_24
             pkgs.pnpm_10

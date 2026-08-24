@@ -62,6 +62,7 @@ Optional settings:
 | `ENABLEBANKING_APP_ID` | unset | Enable Banking application ID. Set with `ENABLEBANKING_PRIVATE_KEY`. |
 | `ENABLEBANKING_PRIVATE_KEY` | unset | Path to the Enable Banking private key. Set with `ENABLEBANKING_APP_ID`. |
 | `ENABLEBANKING_API_ORIGIN` | `https://api.enablebanking.com` | Enable Banking API origin. Register `BACKEND_URL/api/v1/enablebanking/callback` as the callback. |
+| `ENABLEBANKING_ALLOWED_OIDC_SUBJECTS` | unset | Comma-separated OIDC `sub` claims allowed to use bank sync. |
 
 ## More screenshots
 

@@ -14,9 +14,13 @@ import { pages } from "./pages";
 export function CommandPalette(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  enableBanking: boolean;
 }) {
   const [, navigate] = useLocation();
   const [input, setInput] = useState("");
+  const availablePages = pages.filter(
+    (page) => page.href !== "/connections" || props.enableBanking,
+  );
 
   function go(href: string) {
     props.onOpenChange(false);
@@ -36,7 +40,7 @@ export function CommandPalette(props: {
         <DialogTitle className="sr-only">Go to page</DialogTitle>
 
         <Combobox.Root<(typeof pages)[number]>
-          items={pages}
+          items={availablePages}
           value={null}
           inline
           open

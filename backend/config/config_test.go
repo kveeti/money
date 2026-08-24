@@ -24,6 +24,7 @@ func setRequired(t *testing.T) {
 	t.Setenv("ENABLEBANKING_APP_ID", "")
 	t.Setenv("ENABLEBANKING_PRIVATE_KEY", "")
 	t.Setenv("ENABLEBANKING_API_ORIGIN", "")
+	t.Setenv("ENABLEBANKING_ALLOWED_OIDC_SUBJECTS", "")
 }
 
 func TestLoadConfig_RedirectURLDefaultsToBackend(t *testing.T) {
@@ -72,6 +73,18 @@ func TestLoadConfig_MissingRequiredErrors(t *testing.T) {
 			require.ErrorContains(t, err, missing)
 		})
 	}
+}
+
+func TestLoadConfigParsesEnableBankingSubjectAllowlist(t *testing.T) {
+	setRequired(t)
+	t.Setenv("ENABLEBANKING_ALLOWED_OIDC_SUBJECTS", " subject-1,subject-2, subject-1, ")
+
+	c, err := LoadConfig()
+	require.NoError(t, err)
+	require.True(t, c.EnableBanking.AllowsSubject("subject-1"))
+	require.True(t, c.EnableBanking.AllowsSubject("subject-2"))
+	require.False(t, c.EnableBanking.AllowsSubject("other"))
+	require.Len(t, c.EnableBanking.AllowedSubjects, 2)
 }
 
 func TestLoadConfigSecureCookiesFollowBackendURL(t *testing.T) {

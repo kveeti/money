@@ -9,9 +9,9 @@ import {
 } from "../../api/enablebanking";
 import { menuPages } from "./pages";
 
-export function NavMenu() {
-  const connections = useEnableBankingConnections();
-  const syncStatus = useEnableBankingSyncStatus();
+export function NavMenu(props: { enableBanking: boolean }) {
+  const connections = useEnableBankingConnections(props.enableBanking);
+  const syncStatus = useEnableBankingSyncStatus(props.enableBanking);
   const sync = useSyncEnableBankingAccounts();
   const accounts = (connections.data ?? []).flatMap((connection) =>
     connection.accounts.flatMap((account) =>
@@ -36,16 +36,20 @@ export function NavMenu() {
           className="z-20 outline-none"
         >
           <Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-popover-border bg-popover p-1 text-base text-gray-900 shadow-float outline-none transition-[opacity,scale] duration-150 ease-[cubic-bezier(.16,1,.3,1)] data-ending-style:scale-[.97] data-ending-style:opacity-0 data-starting-style:scale-[.97] data-starting-style:opacity-0 motion-reduce:duration-[1ms]">
-            {menuPages.map((page) => (
-              <Menu.LinkItem
-                key={page.href}
-                render={<Link href={page.href} />}
-                closeOnClick
-                className="flex h-9 cursor-default items-center rounded-lg px-3 capitalize no-underline outline-none data-highlighted:bg-popover-item-selected"
-              >
-                {page.label}
-              </Menu.LinkItem>
-            ))}
+            {menuPages
+              .filter(
+                (page) => page.href !== "/connections" || props.enableBanking,
+              )
+              .map((page) => (
+                <Menu.LinkItem
+                  key={page.href}
+                  render={<Link href={page.href} />}
+                  closeOnClick
+                  className="flex h-9 cursor-default items-center rounded-lg px-3 capitalize no-underline outline-none data-highlighted:bg-popover-item-selected"
+                >
+                  {page.label}
+                </Menu.LinkItem>
+              ))}
             {accounts.length > 0 && (
               <>
                 <Menu.Separator className="my-1 h-px bg-popover-border" />

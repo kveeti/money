@@ -27,17 +27,19 @@ export const enableBankingKeys = {
   syncStatus: ["enable-banking", "sync-status"] as const,
 };
 
-export function useEnableBankingConnections() {
+export function useEnableBankingConnections(enabled = true) {
   return useQuery({
     queryKey: enableBankingKeys.connections,
+    enabled,
     queryFn: () =>
       api<EnableBankingConnection[]>("/api/v1/enablebanking/connections"),
   });
 }
 
-export function useEnableBankingSyncStatus() {
+export function useEnableBankingSyncStatus(enabled = true) {
   return useQuery({
     queryKey: enableBankingKeys.syncStatus,
+    enabled,
     queryFn: () =>
       api<{ syncing: boolean }>("/api/v1/enablebanking/sync-status"),
     refetchInterval: (query) => (query.state.data?.syncing ? 800 : false),

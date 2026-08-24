@@ -26,6 +26,7 @@ func GetRouter(state *state.State, dist fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", NewHandler(HandleLogout(state)))
 
 	getUserID := GetUserIDMiddleware(state)
+	getEnableBankingUserID := GetEnableBankingUserIDMiddleware(state)
 
 	mux.HandleFunc("GET /api/v1/users/@me", NewHandler(HandleGetMe(state, getUserID)))
 	mux.HandleFunc("GET /api/v1/currencies", NewHandler(HandleListCurrencies(state, getUserID)))
@@ -63,16 +64,16 @@ func GetRouter(state *state.State, dist fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/v1/imports/rows/{id}/import", NewHandler(HandleForceImportRow(state, getUserID)))
 	mux.HandleFunc("DELETE /api/v1/imports/{id}", NewHandler(HandleDeleteImport(state, getUserID)))
 
-	mux.HandleFunc("GET /api/v1/enablebanking/banks", NewHandler(HandleListEnableBankingBanks(state, getUserID)))
-	mux.HandleFunc("GET /api/v1/enablebanking/connect", NewHandler(HandleStartEnableBanking(state, getUserID)))
-	mux.HandleFunc("GET /api/v1/enablebanking/callback", NewHandler(HandleEnableBankingCallback(state, getUserID)))
-	mux.HandleFunc("GET /api/v1/enablebanking/connections", NewHandler(HandleListEnableBankingConnections(state, getUserID)))
-	mux.HandleFunc("GET /api/v1/enablebanking/sync-status", NewHandler(HandleEnableBankingSyncStatus(state, getUserID)))
-	mux.HandleFunc("POST /api/v1/enablebanking/sync", NewHandler(HandleSyncSelectedEnableBankingAccounts(state, getUserID)))
-	mux.HandleFunc("POST /api/v1/enablebanking/connections/{id}/accounts/{uid}/map", NewHandler(HandleMapEnableBankingAccount(state, getUserID)))
-	mux.HandleFunc("POST /api/v1/enablebanking/connections/{id}/accounts/{uid}/sync", NewHandler(HandleSyncEnableBankingAccount(state, getUserID)))
-	mux.HandleFunc("POST /api/v1/enablebanking/connections/{id}/sync", NewHandler(HandleSyncAllEnableBankingAccounts(state, getUserID)))
-	mux.HandleFunc("DELETE /api/v1/enablebanking/connections/{id}", NewHandler(HandleDeleteEnableBankingConnection(state, getUserID)))
+	mux.HandleFunc("GET /api/v1/enablebanking/banks", NewHandler(HandleListEnableBankingBanks(state, getEnableBankingUserID)))
+	mux.HandleFunc("GET /api/v1/enablebanking/connect", NewHandler(HandleStartEnableBanking(state, getEnableBankingUserID)))
+	mux.HandleFunc("GET /api/v1/enablebanking/callback", NewHandler(HandleEnableBankingCallback(state, getEnableBankingUserID)))
+	mux.HandleFunc("GET /api/v1/enablebanking/connections", NewHandler(HandleListEnableBankingConnections(state, getEnableBankingUserID)))
+	mux.HandleFunc("GET /api/v1/enablebanking/sync-status", NewHandler(HandleEnableBankingSyncStatus(state, getEnableBankingUserID)))
+	mux.HandleFunc("POST /api/v1/enablebanking/sync", NewHandler(HandleSyncSelectedEnableBankingAccounts(state, getEnableBankingUserID)))
+	mux.HandleFunc("POST /api/v1/enablebanking/connections/{id}/accounts/{uid}/map", NewHandler(HandleMapEnableBankingAccount(state, getEnableBankingUserID)))
+	mux.HandleFunc("POST /api/v1/enablebanking/connections/{id}/accounts/{uid}/sync", NewHandler(HandleSyncEnableBankingAccount(state, getEnableBankingUserID)))
+	mux.HandleFunc("POST /api/v1/enablebanking/connections/{id}/sync", NewHandler(HandleSyncAllEnableBankingAccounts(state, getEnableBankingUserID)))
+	mux.HandleFunc("DELETE /api/v1/enablebanking/connections/{id}", NewHandler(HandleDeleteEnableBankingConnection(state, getEnableBankingUserID)))
 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -225,6 +226,7 @@ func Authenticate(state *state.State, r *http.Request) (*AuthInfo, error) {
 
 	return &AuthInfo{
 		UserID:    session.UserID,
+		Subject:   session.Subject,
 		SessionID: session.ID,
 	}, nil
 }
@@ -239,10 +241,24 @@ func GetUserIDMiddleware(state *state.State) GetUserID {
 	}
 }
 
+func GetEnableBankingUserIDMiddleware(state *state.State) GetUserID {
+	return func(r *http.Request) (string, error) {
+		info, err := Authenticate(state, r)
+		if err != nil {
+			return "", err
+		}
+		if !state.Config.EnableBanking.AllowsSubject(info.Subject) {
+			return "", NewErr("Enable Banking is not available for this account", http.StatusForbidden)
+		}
+		return info.UserID, nil
+	}
+}
+
 type GetUserID func(r *http.Request) (string, error)
 
 type AuthInfo struct {
 	UserID    string
+	Subject   string
 	SessionID string
 }
 

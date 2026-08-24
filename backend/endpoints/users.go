@@ -20,7 +20,12 @@ func HandleGetMe(state *state.State, getUserID GetUserID) Handler {
 			return NewErr("user not found", http.StatusNotFound)
 		}
 
-		Json(w, JSON{"id": user.ID, "email": user.Email, "home_currency": user.HomeCurrency})
+		Json(w, JSON{
+			"id":                       user.ID,
+			"email":                    user.Email,
+			"home_currency":            user.HomeCurrency,
+			"enable_banking_available": state.Config.EnableBanking.Enabled() && state.Config.EnableBanking.AllowsSubject(user.Subject),
+		})
 		return nil
 	}
 }

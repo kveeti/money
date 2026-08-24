@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { useMeQuery } from "../../api/user";
 import { CommandPalette } from "./command-palette";
 import { ImmediateNavLink } from "./immediate-nav-link";
 import { NavMenu } from "./nav-menu";
@@ -7,6 +8,8 @@ import { navPages } from "./pages";
 
 export function Nav() {
   const [open, setOpen] = useState(false);
+  const me = useMeQuery();
+  const enableBanking = me.data?.enable_banking_available === true;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -29,10 +32,14 @@ export function Nav() {
             </li>
           ))}
         </ul>
-        <NavMenu />
+        <NavMenu enableBanking={enableBanking} />
       </div>
 
-      <CommandPalette open={open} onOpenChange={setOpen} />
+      <CommandPalette
+        open={open}
+        onOpenChange={setOpen}
+        enableBanking={enableBanking}
+      />
     </nav>
   );
 }

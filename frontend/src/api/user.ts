@@ -6,6 +6,7 @@ export interface Me {
   id: string;
   email: string;
   home_currency: string;
+  enable_banking_available: boolean;
 }
 
 export function useMeQuery() {

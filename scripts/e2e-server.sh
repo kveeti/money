@@ -28,6 +28,7 @@ trap cleanup EXIT INT TERM
 )
 
 psql "$admin_url" -v ON_ERROR_STOP=1 -c "create database $database" >/dev/null
+openssl genrsa -out "$bin_dir/enablebanking.pem" 2048 >/dev/null 2>&1
 
 DEVIDP_ADDR="127.0.0.1:$idp_port" \
 DEVIDP_ISSUER="http://127.0.0.1:$idp_port" \
@@ -57,6 +58,9 @@ OIDC_ISSUER="http://127.0.0.1:$idp_port" \
 OIDC_CLIENT_ID=dash \
 OIDC_CLIENT_SECRET=dash \
 OIDC_REDIRECT_URL= \
+ENABLEBANKING_APP_ID=e2e \
+ENABLEBANKING_PRIVATE_KEY="$bin_dir/enablebanking.pem" \
+ENABLEBANKING_ALLOWED_OIDC_SUBJECTS=e2e-bank-auth,e2e-bank-connections \
 IS_PROD=0 \
 "$bin_dir/dash" >"$bin_dir/backend.log" 2>&1 &
 backend_pid=$!

@@ -40,8 +40,9 @@ type testApp struct {
 // appOpts tweaks the config a test app is built with. Zero values mean: CORS
 // off (same-origin) and the redirect URL defaulted to the app's own callback.
 type appOpts struct {
-	frontURL    string
-	redirectURL string
+	frontURL          string
+	redirectURL       string
+	denyEnableBanking bool
 }
 
 // newTestAppWith wires a mock OIDC provider, a fresh database and the real
@@ -75,7 +76,17 @@ func newTestAppWith(t *testing.T, opts appOpts) *testApp {
 	})
 	require.NoError(t, err)
 
-	appConfig := &config.Config{BackendUrl: appURL, FrontUrl: opts.frontURL}
+	allowedSubjects := map[string]struct{}{"1234567890": {}}
+	if opts.denyEnableBanking {
+		allowedSubjects = map[string]struct{}{}
+	}
+	appConfig := &config.Config{
+		BackendUrl: appURL,
+		FrontUrl:   opts.frontURL,
+		EnableBanking: config.EnableBankingConfig{
+			AllowedSubjects: allowedSubjects,
+		},
+	}
 	st := state.NewState(d, appConfig, oidcClient)
 
 	srv := &http.Server{Handler: GetRouter(st, testFrontendFS())}

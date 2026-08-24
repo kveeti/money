@@ -20,6 +20,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestEnableBankingRequiresAllowedOIDCSubject(t *testing.T) {
+	denied := newTestAppWith(t, appOpts{frontURL: testFrontURL, denyEnableBanking: true})
+	denied.state.Config.EnableBanking.ApplicationID = "app"
+	denied.state.Config.EnableBanking.PrivateKeyPath = "key.pem"
+	resp := authed(t, denied, http.MethodGet, "/api/v1/enablebanking/connections", nil)
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp = authed(t, denied, http.MethodGet, "/api/v1/users/@me", nil)
+	var deniedUser struct {
+		Available bool `json:"enable_banking_available"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&deniedUser))
+	require.False(t, deniedUser.Available)
+
+	allowed := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	allowed.state.Config.EnableBanking.ApplicationID = "app"
+	allowed.state.Config.EnableBanking.PrivateKeyPath = "key.pem"
+	resp = authed(t, allowed, http.MethodGet, "/api/v1/enablebanking/connections", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = authed(t, allowed, http.MethodGet, "/api/v1/users/@me", nil)
+	var allowedUser struct {
+		Available bool `json:"enable_banking_available"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&allowedUser))
+	require.True(t, allowedUser.Available)
+}
+
 func TestListEnableBankingConnectionsMapsBucketsByIBAN(t *testing.T) {
 	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
 	bucketID := createBucket(t, app, "asset", "Bank")

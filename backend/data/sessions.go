@@ -17,6 +17,7 @@ func NewSessions(s *sql.DB) *Sessions {
 type Session struct {
 	ID        string
 	UserID    string
+	Subject   string
 	TokenHash string
 	CreatedAt time.Time
 	ExpiresAt time.Time
@@ -36,13 +37,16 @@ func (s *Sessions) GetSessionByTokenHash(ctx context.Context, tokenHash string) 
 	var session Session
 
 	err := s.QueryRowContext(ctx, `
-		select id, user_id, token_hash, created_at, expires_at
-		from sessions
-		where token_hash = $1
-		  and expires_at > $2
+		select session.id, session.user_id, users.subject,
+		       session.token_hash, session.created_at, session.expires_at
+		from sessions session
+		join users on users.id = session.user_id
+		where session.token_hash = $1
+		  and session.expires_at > $2
 		limit 1
 	`, tokenHash, time.Now().UTC()).Scan(
-		&session.ID, &session.UserID, &session.TokenHash, &session.CreatedAt, &session.ExpiresAt,
+		&session.ID, &session.UserID, &session.Subject,
+		&session.TokenHash, &session.CreatedAt, &session.ExpiresAt,
 	)
 
 	if err == sql.ErrNoRows {

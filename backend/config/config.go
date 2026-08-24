@@ -35,13 +35,19 @@ type Config struct {
 // EnableBankingConfig is optional. The integration is available only when both
 // the application ID and private key path are set.
 type EnableBankingConfig struct {
-	ApplicationID  string
-	PrivateKeyPath string
-	APIOrigin      string
+	ApplicationID   string
+	PrivateKeyPath  string
+	APIOrigin       string
+	AllowedSubjects map[string]struct{}
 }
 
 func (c EnableBankingConfig) Enabled() bool {
 	return c.ApplicationID != "" && c.PrivateKeyPath != ""
+}
+
+func (c EnableBankingConfig) AllowsSubject(subject string) bool {
+	_, allowed := c.AllowedSubjects[subject]
+	return allowed
 }
 
 // callbackPath must match the OIDC callback route in the router.
@@ -89,8 +95,19 @@ func (c Config) LogValue() slog.Value {
 			slog.String("application_id", c.EnableBanking.ApplicationID),
 			slog.String("private_key_path", redact(c.EnableBanking.PrivateKeyPath)),
 			slog.String("api_origin", c.EnableBanking.APIOrigin),
+			slog.Int("allowed_subjects", len(c.EnableBanking.AllowedSubjects)),
 		),
 	)
+}
+
+func parseSubjectAllowlist(value string) map[string]struct{} {
+	allowed := map[string]struct{}{}
+	for subject := range strings.SplitSeq(value, ",") {
+		if subject = strings.TrimSpace(subject); subject != "" {
+			allowed[subject] = struct{}{}
+		}
+	}
+	return allowed
 }
 
 func redact(value string) string {
@@ -126,9 +143,10 @@ func LoadConfig() (*Config, error) {
 		ImportDir:       os.Getenv("IMPORT_DIR"),
 		DisableRateSync: os.Getenv("DISABLE_RATE_SYNC") == "1",
 		EnableBanking: EnableBankingConfig{
-			ApplicationID:  os.Getenv("ENABLEBANKING_APP_ID"),
-			PrivateKeyPath: os.Getenv("ENABLEBANKING_PRIVATE_KEY"),
-			APIOrigin:      os.Getenv("ENABLEBANKING_API_ORIGIN"),
+			ApplicationID:   os.Getenv("ENABLEBANKING_APP_ID"),
+			PrivateKeyPath:  os.Getenv("ENABLEBANKING_PRIVATE_KEY"),
+			APIOrigin:       os.Getenv("ENABLEBANKING_API_ORIGIN"),
+			AllowedSubjects: parseSubjectAllowlist(os.Getenv("ENABLEBANKING_ALLOWED_OIDC_SUBJECTS")),
 		},
 		OIDC: OIDCConfig{
 			Issuer:       os.Getenv("OIDC_ISSUER"),

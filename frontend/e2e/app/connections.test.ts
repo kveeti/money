@@ -5,7 +5,7 @@ import { login } from "../helpers";
 test("bank connections page exposes connect and re-auth entry points", async ({
   page,
 }, testInfo) => {
-  await login(page, testInfo);
+  await login(page, testInfo, "e2e-bank-connections");
   await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("menuitem", { name: "banks" }).click();
   await expect(page).toHaveURL(/\/connections$/);
