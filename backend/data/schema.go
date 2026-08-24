@@ -20,9 +20,13 @@ var initialMigration string
 //go:embed migrations/002_import_limits.sql
 var importLimitsMigration string
 
+//go:embed migrations/003_maintenance.sql
+var maintenanceMigration string
+
 var migrations = []migration{
 	{version: 1, sql: initialMigration},
 	{version: 2, sql: importLimitsMigration},
+	{version: 3, sql: maintenanceMigration},
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) (err error) {
@@ -39,6 +43,12 @@ func applyMigrations(ctx context.Context, db *sql.DB) (err error) {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
 	defer tx.Rollback()
+
+	// One process migrates at a time. The transaction-scoped lock releases on
+	// commit, rollback, or connection loss.
+	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(1684102501)`); err != nil {
+		return fmt.Errorf("lock migrations: %w", err)
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 create table if not exists schema_migrations (

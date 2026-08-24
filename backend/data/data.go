@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -53,13 +54,22 @@ func (d *Data) Close() error {
 	return d.db.Close()
 }
 
+func (d *Data) Ping(ctx context.Context) error {
+	return d.db.PingContext(ctx)
+}
+
 func connectPostgres(ctx context.Context, dbURL string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
 		return nil, fmt.Errorf("error opening database: %w", err)
 	}
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(30 * time.Minute)
 
 	if err := db.PingContext(ctx); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("error pinging database: %w", err)
 	}
 

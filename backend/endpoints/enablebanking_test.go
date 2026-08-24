@@ -570,7 +570,7 @@ func TestSyncEnableBankingRejectsRepeatedContinuation(t *testing.T) {
 	require.Zero(t, jobs)
 }
 
-func TestEnableBankingSyncRecoveryKeepsCompletedPage(t *testing.T) {
+func TestEnableBankingSyncExpiredLeaseKeepsCompletedPage(t *testing.T) {
 	provider := httptest.NewServer(http.NotFoundHandler())
 	defer provider.Close()
 	app, _, integrationID, _ := newEnableBankingSyncTest(t, provider.URL)
@@ -581,13 +581,16 @@ func TestEnableBankingSyncRecoveryKeepsCompletedPage(t *testing.T) {
 	require.True(t, ok)
 	row := data.ParsedRow{OccurredOn: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), Amount: -1234, Currency: "EUR"}
 	require.NoError(t, app.d.StageEnableBankingPage(t.Context(), job, []data.ParsedRow{row}, nil, "next", false))
-	require.NoError(t, app.d.RecoverEnableBankingSyncs(t.Context()))
+	_, err = app.d.Users.Exec("update import_batches set claim_expires_at = now() - interval '1 minute' where id = $1", batchID)
+	require.NoError(t, err)
 
 	recovered, ok, err := app.d.ClaimEnableBankingSync(t.Context())
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, batchID, recovered.BatchID)
+	require.NotEqual(t, job.ClaimID, recovered.ClaimID)
 	require.Equal(t, "next", recovered.ContinuationKey)
+	require.ErrorIs(t, app.d.StageEnableBankingPage(t.Context(), job, nil, nil, "", true), data.ErrBankSyncNotFound)
 	require.Equal(t, int64(1), recovered.NextSequence)
 	var staged int
 	require.NoError(t, app.d.Users.QueryRow("select count(*) from import_staged_rows where batch_id=$1", batchID).Scan(&staged))
@@ -595,7 +598,7 @@ func TestEnableBankingSyncRecoveryKeepsCompletedPage(t *testing.T) {
 
 	secondRow := data.ParsedRow{OccurredOn: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), Amount: 10000, Currency: "EUR"}
 	require.NoError(t, app.d.StageEnableBankingPage(t.Context(), recovered, []data.ParsedRow{secondRow}, nil, "", true))
-	added, duplicates, err := app.d.FinalizeEnableBankingSync(t.Context(), batchID)
+	added, duplicates, err := app.d.FinalizeEnableBankingSync(t.Context(), recovered)
 	require.NoError(t, err)
 	require.Equal(t, 2, added)
 	require.Zero(t, duplicates)

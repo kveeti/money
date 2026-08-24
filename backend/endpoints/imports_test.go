@@ -2,6 +2,7 @@ package endpoints
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"mime/multipart"
@@ -388,6 +389,38 @@ func TestImportRejectsOversizeFile(t *testing.T) {
 	body := nordeaHeader + strings.Repeat(nordeaRow("2026/07/01", "-1,00", "A", "a"), 40)
 	resp := importCSV(t, app, bank, body)
 	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
+func TestImportWorkersOnlyReclaimExpiredLeases(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	var userID string
+	require.NoError(t, app.d.Users.QueryRow("select owner_user_id from buckets where id=$1", bank).Scan(&userID))
+	batchID, claimID := data.NewPrivateID(), data.NewPrivateID()
+	_, err := app.d.Users.Exec(`
+		insert into import_batches (
+			id, user_id, bucket_id, source, filename, created_at, status,
+			claim_id, claim_expires_at
+		)
+		values ($1, $2, $3, 'csv', 'leased.csv', now(), 'processing', $4, now() + interval '10 minutes')
+	`, batchID, userID, bank, claimID)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	app.d.StartImportWorkers(ctx)
+	time.Sleep(50 * time.Millisecond)
+	var status, currentClaim string
+	require.NoError(t, app.d.Users.QueryRow("select status, claim_id from import_batches where id=$1", batchID).Scan(&status, &currentClaim))
+	require.Equal(t, "processing", status)
+	require.Equal(t, claimID, currentClaim)
+
+	_, err = app.d.Users.Exec("update import_batches set claim_expires_at = now() - interval '1 minute' where id=$1", batchID)
+	require.NoError(t, err)
+	app.d.StartImportWorkers(ctx)
+	require.Eventually(t, func() bool {
+		return app.d.Users.QueryRow("select status from import_batches where id=$1", batchID).Scan(&status) == nil && status == "failed"
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestImportRejectsWhenUserHasTooManyActiveImports(t *testing.T) {

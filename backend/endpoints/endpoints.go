@@ -75,6 +75,12 @@ func GetRouter(state *state.State, dist fs.FS) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/enablebanking/connections/{id}", NewHandler(HandleDeleteEnableBankingConnection(state, getUserID)))
 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := state.Data.Ping(ctx); err != nil {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 

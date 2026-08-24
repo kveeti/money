@@ -291,7 +291,8 @@ func (d *Data) DeleteBankIntegration(ctx context.Context, userID, id, provider s
 func cancelIntegrationSyncs(ctx context.Context, tx *sql.Tx, integrationID, reason string) error {
 	if _, err := tx.ExecContext(ctx, `
 		update import_batches batch
-		set status = 'failed', error = $2
+		set status = 'failed', error = $2,
+		    claim_id = null, claim_expires_at = null
 		from enable_banking_syncs sync
 		where sync.integration_id = $1
 		  and sync.completed_at is null

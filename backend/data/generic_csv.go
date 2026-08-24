@@ -16,6 +16,8 @@ const (
 	MaxImportTextBytes = 4 << 10
 )
 
+var ErrCSVTooManyRows = fmt.Errorf("CSV has more than %d rows", MaxGenericCSVRows)
+
 var genericCSVHeader = []string{"date", "occurred_at", "amount", "currency", "counterparty", "note"}
 var amountRe = regexp.MustCompile(`^(-?)(\d+)(?:\.(\d+))?$`)
 
@@ -62,7 +64,7 @@ func (p *GenericCSVParser) Next() bool {
 		}
 		p.rows++
 		if p.rows > MaxGenericCSVRows {
-			p.err = fmt.Errorf("CSV has more than %d rows", MaxGenericCSVRows)
+			p.err = ErrCSVTooManyRows
 			return false
 		}
 		if err != nil {

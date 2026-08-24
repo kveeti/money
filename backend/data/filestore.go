@@ -83,7 +83,10 @@ func (s *PostgresFileStore) Delete(ctx context.Context, key string) error {
 type DiskFileStore struct{ dir string }
 
 func NewDiskFileStore(dir string) (*DiskFileStore, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, err
 	}
 	return &DiskFileStore{dir: dir}, nil
@@ -92,7 +95,7 @@ func NewDiskFileStore(dir string) (*DiskFileStore, error) {
 func (s *DiskFileStore) path(key string) string { return filepath.Join(s.dir, key) }
 
 func (s *DiskFileStore) Put(ctx context.Context, key string, r io.Reader) error {
-	f, err := os.Create(s.path(key))
+	f, err := os.OpenFile(s.path(key), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

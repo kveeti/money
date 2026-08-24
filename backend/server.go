@@ -43,6 +43,7 @@ func App(config *config.Config, started chan struct{}) {
 	}
 
 	d.StartImportWorkers(ctx)
+	d.StartMaintenance(ctx)
 	if !config.DisableRateSync {
 		d.StartRateSync(ctx)
 	}

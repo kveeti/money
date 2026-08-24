@@ -14,18 +14,9 @@ const (
 )
 
 // StartImportWorkers launches the background pool that stages uploaded import
-// batches into pending inbox rows. Boot recovery first re-queues any batch left
-// `processing` by a crash (its file is still stored, so a retry is free). Workers
-// then wake on a kick (sent after each upload) or a periodic poll, and claim
-// whole batches via FOR UPDATE SKIP LOCKED with per-user round-robin fairness.
+// batches into pending inbox rows. Workers wake on a kick or periodic poll and
+// reclaim only jobs whose lease has expired.
 func (d *Data) StartImportWorkers(ctx context.Context) {
-	if _, err := d.db.ExecContext(ctx, `
-		update import_batches
-		set status = 'uploaded'
-		where status = 'processing'
-	`); err != nil {
-		slog.Error("import boot recovery failed", "err", err)
-	}
 	for i := 0; i < importWorkers; i++ {
 		go d.importWorker(ctx)
 	}

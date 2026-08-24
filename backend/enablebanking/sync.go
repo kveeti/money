@@ -27,9 +27,6 @@ func NewSyncer(d *data.Data, client *Client) *Syncer {
 }
 
 func (s *Syncer) Start(ctx context.Context) {
-	if err := s.data.RecoverEnableBankingSyncs(ctx); err != nil {
-		slog.Error("Enable Banking sync recovery failed", "err", err)
-	}
 	for range syncWorkers {
 		go s.worker(ctx)
 	}
@@ -99,11 +96,11 @@ func (s *Syncer) process(ctx context.Context, job data.EnableBankingSyncJob) {
 			var apiErr *APIError
 			if errors.As(err, &apiErr) {
 				if apiErr.Code == "EXPIRED_SESSION" || apiErr.Code == "REVOKED_SESSION" {
-					s.fail(ctx, job.BatchID, errors.New("bank connection needs re-authentication"))
+					s.fail(ctx, job, errors.New("bank connection needs re-authentication"))
 					return
 				}
 				if apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 408 && apiErr.Status != 429 {
-					s.fail(ctx, job.BatchID, apiErr)
+					s.fail(ctx, job, apiErr)
 					return
 				}
 			}
@@ -121,7 +118,7 @@ func (s *Syncer) process(ctx context.Context, job data.EnableBankingSyncJob) {
 			fetchedAll,
 		); err != nil {
 			if errors.Is(err, data.ErrBankSyncRepeatedContinuation) {
-				s.fail(ctx, job.BatchID, err)
+				s.fail(ctx, job, err)
 			} else {
 				s.retry(ctx, job, err)
 			}
@@ -135,7 +132,7 @@ func (s *Syncer) process(ctx context.Context, job data.EnableBankingSyncJob) {
 
 	var added, duplicates int
 	for attempt := 0; attempt < syncMaxAttempts; attempt++ {
-		added, duplicates, err = s.data.FinalizeEnableBankingSync(ctx, job.BatchID)
+		added, duplicates, err = s.data.FinalizeEnableBankingSync(ctx, job)
 		if err == nil {
 			slog.Info("Enable Banking sync done", "batch", job.BatchID, "added", added, "duplicates", duplicates)
 			return
@@ -145,26 +142,26 @@ func (s *Syncer) process(ctx context.Context, job data.EnableBankingSyncJob) {
 		}
 		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 	}
-	s.fail(ctx, job.BatchID, err)
+	s.fail(ctx, job, err)
 }
 
 func (s *Syncer) retry(ctx context.Context, job data.EnableBankingSyncJob, cause error) {
 	if job.Attempts+1 >= syncMaxAttempts {
-		s.fail(ctx, job.BatchID, cause)
+		s.fail(ctx, job, cause)
 		return
 	}
 	delay := time.Second * time.Duration(1<<job.Attempts)
-	if err := s.data.RetryEnableBankingSync(ctx, job.BatchID, time.Now().Add(delay), cause); err != nil {
+	if err := s.data.RetryEnableBankingSync(ctx, job, time.Now().Add(delay), cause); err != nil {
 		slog.Error("queue Enable Banking sync retry", "batch", job.BatchID, "err", err)
 	}
 }
 
-func (s *Syncer) fail(ctx context.Context, batchID string, cause error) {
-	if err := s.data.FailEnableBankingSync(ctx, batchID, cause); err != nil {
-		slog.Error("fail Enable Banking sync", "batch", batchID, "err", err)
+func (s *Syncer) fail(ctx context.Context, job data.EnableBankingSyncJob, cause error) {
+	if err := s.data.FailEnableBankingSync(ctx, job, cause); err != nil {
+		slog.Error("fail Enable Banking sync", "batch", job.BatchID, "err", err)
 		return
 	}
-	slog.Error("Enable Banking sync failed", "batch", batchID, "err", cause)
+	slog.Error("Enable Banking sync failed", "batch", job.BatchID, "err", cause)
 }
 
 func normalizeTransactions(transactions []Transaction, currencies map[string]int, firstSequence int64) ([]data.ParsedRow, []data.RowError) {

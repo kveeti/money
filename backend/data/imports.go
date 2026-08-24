@@ -17,10 +17,11 @@ const (
 )
 
 var (
-	ErrImportBucket   = errors.New("import target must be an asset or liability bucket you own")
-	ErrImportLimit    = errors.New("too many imports; try again later")
-	ErrNotDuplicate   = errors.New("import row is not a duplicate")
-	ErrImportNotFound = errors.New("import batch not found")
+	ErrImportBucket    = errors.New("import target must be an asset or liability bucket you own")
+	ErrImportLimit     = errors.New("too many imports; try again later")
+	ErrImportClaimLost = errors.New("import job claim was lost")
+	ErrNotDuplicate    = errors.New("import row is not a duplicate")
+	ErrImportNotFound  = errors.New("import batch not found")
 )
 
 type ImportBatch struct {
@@ -36,6 +37,7 @@ type ImportBatch struct {
 	Duplicates      int
 	ParseErrors     json.RawMessage
 	ParseErrorCount int
+	ClaimID         string
 }
 
 type ImportRow struct {

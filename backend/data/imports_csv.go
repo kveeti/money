@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -41,6 +42,8 @@ func (c *csvCopyRows) Next() bool {
 func (c *csvCopyRows) Values() ([]any, error) { return c.cur, nil }
 func (c *csvCopyRows) Err() error             { return c.err }
 
+const importClaimLease = 10 * time.Minute
+
 // importCSV parses, stages, and dedupes one uploaded file in one transaction.
 func (d *Data) importCSV(ctx context.Context, batch ImportBatch, parser *GenericCSVParser) (int, int, error) {
 	conn, err := d.db.Conn(ctx)
@@ -57,6 +60,20 @@ func (d *Data) importCSV(ctx context.Context, batch ImportBatch, parser *Generic
 			return err
 		}
 		defer tx.Rollback(ctx)
+
+		var claimedID string
+		if err := tx.QueryRow(ctx, `
+			select id
+			from import_batches
+			where id = $1
+			  and status = 'processing'
+			  and claim_id = $2
+			for update
+		`, batch.ID, batch.ClaimID).Scan(&claimedID); err == pgx.ErrNoRows {
+			return ErrImportClaimLost
+		} else if err != nil {
+			return err
+		}
 
 		rows := &csvCopyRows{src: parser, batchID: batch.ID, bucketID: batch.BucketID}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"import_staged_rows"},
@@ -84,9 +101,12 @@ func (d *Data) importCSV(ctx context.Context, batch ImportBatch, parser *Generic
 			set status = 'done',
 			    error = null,
 			    parse_errors = $2::jsonb,
-			    parse_error_count = $3
+			    parse_error_count = $3,
+			    claim_id = null,
+			    claim_expires_at = null
 			where id = $1
-		`, batch.ID, parseErrors, parser.ErrorCount()); err != nil {
+			  and claim_id = $4
+		`, batch.ID, parseErrors, parser.ErrorCount(), batch.ClaimID); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -96,11 +116,19 @@ func (d *Data) importCSV(ctx context.Context, batch ImportBatch, parser *Generic
 
 func (d *Data) claimCSVImport(ctx context.Context) (ImportBatch, bool, error) {
 	var batch ImportBatch
+	batch.ClaimID = NewPrivateID()
 	err := d.db.QueryRowContext(ctx, `
 		with ready_batch as (
 			select batch.id
 			from import_batches batch
-			where batch.status = 'uploaded'
+			where batch.source = 'csv'
+			  and (
+			    batch.status = 'uploaded'
+			    or (
+			      batch.status = 'processing'
+			      and (batch.claim_expires_at is null or batch.claim_expires_at <= now())
+			    )
+			  )
 			order by
 				(
 					select count(*)
@@ -113,10 +141,12 @@ func (d *Data) claimCSVImport(ctx context.Context) (ImportBatch, bool, error) {
 			for update skip locked
 		)
 		update import_batches
-		set status = 'processing'
+		set status = 'processing',
+		    claim_id = $1,
+		    claim_expires_at = now() + $2 * interval '1 second'
 		where id in (select id from ready_batch)
 		returning id, user_id, bucket_id, source, filename
-	`).Scan(
+	`, batch.ClaimID, int(importClaimLease/time.Second)).Scan(
 		&batch.ID,
 		&batch.UserID,
 		&batch.BucketID,
@@ -143,7 +173,7 @@ func (d *Data) processNextCSVImport(ctx context.Context) (bool, error) {
 	added, duplicates, parseErrors, parseErrorCount, err := d.importCSVWithRetry(ctx, batch)
 	if err != nil {
 		slog.Error("CSV import failed", "batch", batch.ID, "took", time.Since(start), "err", err)
-		d.failCSVImport(ctx, batch.ID, err)
+		d.failCSVImport(ctx, batch, err)
 		return true, nil
 	}
 
@@ -178,6 +208,9 @@ func (d *Data) importCSVWithRetry(ctx context.Context, batch ImportBatch) (int, 
 			return added, duplicates, parser.Errors(), parser.ErrorCount(), nil
 		}
 		lastErr = err
+		if errors.Is(err, ErrCSVTooManyRows) || errors.Is(err, ErrImportClaimLost) {
+			return 0, 0, nil, 0, err
+		}
 		if ctx.Err() != nil {
 			return 0, 0, nil, 0, ctx.Err()
 		}
@@ -187,13 +220,16 @@ func (d *Data) importCSVWithRetry(ctx context.Context, batch ImportBatch) (int, 
 	return 0, 0, nil, 0, lastErr
 }
 
-func (d *Data) failCSVImport(ctx context.Context, batchID string, cause error) {
+func (d *Data) failCSVImport(ctx context.Context, batch ImportBatch, cause error) {
 	if _, err := d.db.ExecContext(ctx, `
 		update import_batches
 		set status = 'failed',
-		    error = $2
+		    error = $3,
+		    claim_id = null,
+		    claim_expires_at = null
 		where id = $1
-	`, batchID, cause.Error()); err != nil {
-		slog.Error("marking CSV import failed", "batch", batchID, "err", err)
+		  and claim_id = $2
+	`, batch.ID, batch.ClaimID, cause.Error()); err != nil {
+		slog.Error("marking CSV import failed", "batch", batch.ID, "err", err)
 	}
 }

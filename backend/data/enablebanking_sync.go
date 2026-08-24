@@ -31,6 +31,7 @@ type EnableBankingSyncTarget struct {
 
 type EnableBankingSyncJob struct {
 	BatchID         string
+	ClaimID         string
 	BucketID        string
 	AccountUID      string
 	DateFrom        time.Time
@@ -254,14 +255,23 @@ func (d *Data) EnqueueEnableBankingSyncs(ctx context.Context, userID string, tar
 	return batchIDs, nil
 }
 
+const enableBankingClaimLease = 5 * time.Minute
+
 func (d *Data) ClaimEnableBankingSync(ctx context.Context) (EnableBankingSyncJob, bool, error) {
 	var job EnableBankingSyncJob
+	job.ClaimID = NewPrivateID()
 	err := d.db.QueryRowContext(ctx, `
 		with ready_job as (
 			select sync.batch_id
 			from enable_banking_syncs sync
 			join import_batches batch on batch.id = sync.batch_id
-			where batch.status = 'queued'
+			where (
+			    batch.status = 'queued'
+			    or (
+			      batch.status = 'syncing'
+			      and (batch.claim_expires_at is null or batch.claim_expires_at <= now())
+			    )
+			  )
 			  and sync.completed_at is null
 			  and sync.next_attempt_at <= now()
 			order by
@@ -276,7 +286,9 @@ func (d *Data) ClaimEnableBankingSync(ctx context.Context) (EnableBankingSyncJob
 			for update of batch skip locked
 		), claimed_batch as (
 			update import_batches batch
-			set status = 'syncing', error = null
+			set status = 'syncing', error = null,
+			    claim_id = $1,
+			    claim_expires_at = now() + $2 * interval '1 second'
 			where batch.id in (select batch_id from ready_job)
 			returning batch.id, batch.bucket_id
 		)
@@ -291,7 +303,7 @@ func (d *Data) ClaimEnableBankingSync(ctx context.Context) (EnableBankingSyncJob
 			sync.attempts
 		from claimed_batch batch
 		join enable_banking_syncs sync on sync.batch_id = batch.id
-	`).Scan(
+	`, job.ClaimID, int(enableBankingClaimLease/time.Second)).Scan(
 		&job.BatchID,
 		&job.BucketID,
 		&job.AccountUID,
@@ -308,14 +320,6 @@ func (d *Data) ClaimEnableBankingSync(ctx context.Context) (EnableBankingSyncJob
 		return EnableBankingSyncJob{}, false, err
 	}
 	return job, true, nil
-}
-
-func (d *Data) RecoverEnableBankingSyncs(ctx context.Context) error {
-	_, err := d.db.ExecContext(ctx, `
-		update import_batches set status='queued'
-		where status='syncing' and source=$1
-	`, EnableBankingSource)
-	return err
 }
 
 // StageEnableBankingPage commits normalized rows and the next continuation key
@@ -345,8 +349,9 @@ func (d *Data) StageEnableBankingPage(ctx context.Context, job EnableBankingSync
 			where sync.batch_id = $1
 			  and sync.completed_at is null
 			  and batch.status = 'syncing'
+			  and batch.claim_id = $2
 			for update of sync, batch
-		`, job.BatchID).Scan(&continuation, &seenContinuations, &sequence, &dateFrom)
+		`, job.BatchID, job.ClaimID).Scan(&continuation, &seenContinuations, &sequence, &dateFrom)
 		if err == pgx.ErrNoRows {
 			return ErrBankSyncNotFound
 		}
@@ -394,6 +399,13 @@ func (d *Data) StageEnableBankingPage(ctx context.Context, job EnableBankingSync
 		`, job.BatchID, nextContinuation, sequence+int64(len(rows)), fetchedAll); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `
+			update import_batches
+			set claim_expires_at = now() + $3 * interval '1 second'
+			where id = $1 and claim_id = $2
+		`, job.BatchID, job.ClaimID, int(enableBankingClaimLease/time.Second)); err != nil {
+			return err
+		}
 		if len(rowErrors) > 0 {
 			encodedErrors, err := json.Marshal(rowErrors)
 			if err != nil {
@@ -420,7 +432,7 @@ func (d *Data) StageEnableBankingPage(ctx context.Context, job EnableBankingSync
 
 // FinalizeEnableBankingSync runs the existing whole-batch occurrence and dedupe
 // logic over durable provider staging rows.
-func (d *Data) FinalizeEnableBankingSync(ctx context.Context, batchID string) (int, int, error) {
+func (d *Data) FinalizeEnableBankingSync(ctx context.Context, job EnableBankingSyncJob) (int, int, error) {
 	conn, err := d.db.Conn(ctx)
 	if err != nil {
 		return 0, 0, err
@@ -444,8 +456,9 @@ func (d *Data) FinalizeEnableBankingSync(ctx context.Context, batchID string) (i
 			where sync.batch_id = $1
 			  and sync.completed_at is null
 			  and batch.status = 'syncing'
+			  and batch.claim_id = $2
 			for update of sync, batch
-		`, batchID).Scan(&fetchedAll)
+		`, job.BatchID, job.ClaimID).Scan(&fetchedAll)
 		if err == pgx.ErrNoRows {
 			return ErrBankSyncNotFound
 		}
@@ -456,22 +469,23 @@ func (d *Data) FinalizeEnableBankingSync(ctx context.Context, batchID string) (i
 			return fmt.Errorf("bank sync fetch is not complete")
 		}
 
-		added, duplicates, err = finalizeStagedRows(ctx, tx, batchID)
+		added, duplicates, err = finalizeStagedRows(ctx, tx, job.BatchID)
 		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			update import_batches
-			set status = 'done', error = null
-			where id = $1
-		`, batchID); err != nil {
+			set status = 'done', error = null,
+			    claim_id = null, claim_expires_at = null
+			where id = $1 and claim_id = $2
+		`, job.BatchID, job.ClaimID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			update enable_banking_syncs
 			set completed_at = now()
 			where batch_id = $1
-		`, batchID); err != nil {
+		`, job.BatchID); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -479,19 +493,24 @@ func (d *Data) FinalizeEnableBankingSync(ctx context.Context, batchID string) (i
 	return added, duplicates, err
 }
 
-func (d *Data) RetryEnableBankingSync(ctx context.Context, batchID string, nextAttempt time.Time, cause error) error {
+func (d *Data) RetryEnableBankingSync(ctx context.Context, job EnableBankingSyncJob, nextAttempt time.Time, cause error) error {
 	result, err := d.db.ExecContext(ctx, `
-		with retried_job as (
+		with current_claim as (
+			select id
+			from import_batches
+			where id = $1 and claim_id = $2 and status = 'syncing'
+		), retried_job as (
 			update enable_banking_syncs
 			set attempts = attempts + 1,
-			    next_attempt_at = $2
-			where batch_id = $1
+			    next_attempt_at = $3
+			where batch_id in (select id from current_claim)
 			returning batch_id
 		)
 		update import_batches
-		set status = 'queued', error = $3
+		set status = 'queued', error = $4,
+		    claim_id = null, claim_expires_at = null
 		where id in (select batch_id from retried_job)
-	`, batchID, nextAttempt, cause.Error())
+	`, job.BatchID, job.ClaimID, nextAttempt, cause.Error())
 	if err != nil {
 		return err
 	}
@@ -502,23 +521,28 @@ func (d *Data) RetryEnableBankingSync(ctx context.Context, batchID string, nextA
 	return nil
 }
 
-func (d *Data) FailEnableBankingSync(ctx context.Context, batchID string, cause error) error {
+func (d *Data) FailEnableBankingSync(ctx context.Context, job EnableBankingSyncJob, cause error) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		update import_batches
-		set status = 'failed', error = $2
-		where id = $1
-	`, batchID, cause.Error()); err != nil {
+		set status = 'failed', error = $3,
+		    claim_id = null, claim_expires_at = null
+		where id = $1 and claim_id = $2 and status = 'syncing'
+	`, job.BatchID, job.ClaimID, cause.Error())
+	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from import_staged_rows where batch_id = $1`, batchID); err != nil {
+	if count, _ := result.RowsAffected(); count != 1 {
+		return ErrBankSyncNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `delete from import_staged_rows where batch_id = $1`, job.BatchID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from enable_banking_syncs where batch_id = $1`, batchID); err != nil {
+	if _, err := tx.ExecContext(ctx, `delete from enable_banking_syncs where batch_id = $1`, job.BatchID); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	GRACE_PERIOD      = 5 * time.Second
+	GRACE_PERIOD      = 30 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second

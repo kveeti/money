@@ -22,8 +22,9 @@ func TestMigrationsRunOnce(t *testing.T) {
 	require.Contains(t, logs.String(), `"msg":"applying database migration"`)
 	require.Contains(t, logs.String(), `"version":1`)
 	require.Contains(t, logs.String(), `"version":2`)
+	require.Contains(t, logs.String(), `"version":3`)
 	require.Contains(t, logs.String(), `"msg":"database migrations ready"`)
-	require.Contains(t, logs.String(), `"applied":2`)
+	require.Contains(t, logs.String(), `"applied":3`)
 
 	var database string
 	var appliedAt time.Time
@@ -50,6 +51,6 @@ func TestMigrationsRunOnce(t *testing.T) {
 		select count(*), max(applied_at)
 		from schema_migrations
 	`).Scan(&count, &reappliedAt))
-	require.Equal(t, 2, count)
+	require.Equal(t, 3, count)
 	require.Equal(t, appliedAt, reappliedAt)
 }
