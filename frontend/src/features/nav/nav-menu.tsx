@@ -70,6 +70,15 @@ export function NavMenu(props: { enableBanking: boolean }) {
                 </Menu.Item>
               </>
             )}
+            <Menu.Separator className="my-1 h-px bg-popover-border" />
+            <form action="/api/v1/auth/logout" method="post">
+              <Menu.Item
+                render={<button type="submit" />}
+                className="flex h-9 w-full cursor-default items-center rounded-lg px-3 outline-none data-highlighted:bg-popover-item-selected"
+              >
+                Sign out
+              </Menu.Item>
+            </form>
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

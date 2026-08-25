@@ -251,6 +251,30 @@ func TestOIDCFullFlow(t *testing.T) {
 	require.Equal(t, "jane.doe@example.com", body["email"])
 }
 
+func TestLogoutDeletesSessionAndRedirectsToLogin(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+
+	req, _ := http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/logout", nil)
+	req.AddCookie(authCookie)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.Equal(t, testFrontURL+"/login", resp.Header.Get("Location"))
+	clearedCookie := findCookie(resp.Cookies(), auth.CookieName)
+	require.NotNil(t, clearedCookie)
+	require.Empty(t, clearedCookie.Value)
+
+	req, _ = http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err = app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
 // With FRONT_URL unset the frontend is same-origin, so login redirects back to
 // the backend's own URL.
 func TestSameOriginRedirect(t *testing.T) {

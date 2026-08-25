@@ -180,7 +180,7 @@ func HandleLogout(state *state.State) Handler {
 		expired := time.Unix(0, 0)
 		http.SetCookie(w, auth.CreateCookie("", &expired, state.Config.SecureCookies()))
 
-		Json(w, JSON{"ok": true})
+		http.Redirect(w, r, state.Config.EffectiveFrontUrl()+"/login", http.StatusSeeOther)
 		return nil
 	}
 }

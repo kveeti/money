@@ -57,4 +57,11 @@ test("login, navigation, and command palette use the real app", async ({
 
   await expect(page).toHaveURL(/\/stats$/);
   await expect(page.getByRole("button", { name: "month" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/login");
+  await expect(
+    page.getByRole("button", { name: "Sign in", exact: true }),
+  ).toBeVisible();
 });
