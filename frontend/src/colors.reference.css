@@ -1,3 +1,4 @@
+/* Full palette for choosing colors during development. Do not import this file. */
 :root {
   --color-gray-0: oklch(100% 0 none);
   --color-gray-5: oklch(99.85% 0 98.87deg);
