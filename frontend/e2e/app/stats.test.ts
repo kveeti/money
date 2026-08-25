@@ -89,24 +89,24 @@ test("stats periods, comparisons, and category expansion use persisted transacti
       .locator("article")
       .filter({ hasText: "Expenses" })
       .locator("strong"),
-  ).toContainText("800,00");
+  ).toContainText("€800.00");
   await expect(
     summary.locator("article").filter({ hasText: "Income" }).locator("strong"),
-  ).toContainText("2 000,00");
+  ).toContainText("€2,000.00");
   await expect(
     summary.locator("article").filter({ hasText: "Net" }).locator("strong"),
-  ).toContainText("1 200,00");
+  ).toContainText("€1,200.00");
 
   const foodRow = page.getByRole("button", { name: /Food/ });
-  await expect(foodRow).toContainText("800 €");
-  await expect(foodRow).toContainText("650 €");
+  await expect(foodRow).toContainText("€800");
+  await expect(foodRow).toContainText("€650");
   await foodRow.click();
   await expect(page.getByText("Other", { exact: true })).toBeVisible();
   await expect(page.getByText("Groceries", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "last year" }).click();
   await expect(page).toHaveURL(/compare=year/);
-  await expect(foodRow).toContainText("0 €");
+  await expect(foodRow).toContainText("€0");
 
   await page.getByRole("button", { name: "custom" }).click();
   await expect(page).toHaveURL(/period=custom/);

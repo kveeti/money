@@ -60,12 +60,12 @@ test("transaction date and month headings group only matching dates", async ({
       );
     const today = new Date();
     const format = (date: Date) => ({
-      date: new Intl.DateTimeFormat("fi-FI", {
+      date: new Intl.DateTimeFormat(undefined, {
         month: "short",
         day: "numeric",
         year: "numeric",
       }).format(date),
-      month: new Intl.DateTimeFormat("fi-FI", {
+      month: new Intl.DateTimeFormat(undefined, {
         month: "long",
         year: "numeric",
       }).format(date),
@@ -74,14 +74,14 @@ test("transaction date and month headings group only matching dates", async ({
 
     return {
       today: `${todayParts.year}-${todayParts.month}-${todayParts.day}`,
-      todayDate: new Intl.DateTimeFormat("fi-FI", {
+      todayDate: new Intl.DateTimeFormat(undefined, {
         weekday: "short",
         month: "short",
         day: "numeric",
       }).format(today),
-      todayMonth: new Intl.DateTimeFormat("fi-FI", { month: "long" }).format(
-        today,
-      ),
+      todayMonth: new Intl.DateTimeFormat(undefined, {
+        month: "long",
+      }).format(today),
       july2001: format(new Date("2001-07-01T12:00:00Z")),
       july2000: format(new Date("2000-07-02T12:00:00Z")),
     };
@@ -478,7 +478,7 @@ test("removing one transfer side leaves the counterpart unmatched", async ({
   const outgoingRow = page
     .getByRole("link", { name: "View Transfer out" })
     .locator("..");
-  await expect(outgoingRow).toContainText(/[−-]50/);
+  await expect(outgoingRow).toContainText("-€50.00");
   await expect(
     page.getByRole("link", { name: "View Transfer in" }),
   ).toHaveCount(0);

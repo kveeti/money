@@ -106,7 +106,9 @@ test("splitting an inbox row categorizes it across two buckets", async ({
     0,
   );
   await dialog.getByLabel("Split 1 amount").fill("6.00");
-  await expect(dialog.getByText(/4,00.*remaining/)).toBeVisible();
+  await expect(
+    dialog.getByText("€4.00 remaining", { exact: true }),
+  ).toBeVisible();
   await dialog.getByLabel("Split 2 amount").fill("4.00");
 
   let failSplit = true;
@@ -134,7 +136,7 @@ test("splitting an inbox row categorizes it across two buckets", async ({
   await page.getByRole("option", { name: "Split transaction" }).click();
   await expect(
     dialog.getByText(
-      "This transaction cannot be split because each split must be at least 0,01 €.",
+      "This transaction cannot be split because each split must be at least €0.01.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -164,15 +166,15 @@ test("splitting an inbox row categorizes it across two buckets", async ({
     .filter({ hasText: "Split market" });
   await expect(transactionRow).toContainText("Groceries, Travel");
   await expect(transactionRow).toContainText("Checking");
-  await expect(transactionRow).toContainText(/[−-]10,00/);
-  await expect(transactionRow).not.toContainText("6,00");
+  await expect(transactionRow).toContainText("-€10.00");
+  await expect(transactionRow).not.toContainText("€6.00");
   await transactionRow.getByRole("link", { name: "View Split market" }).click();
 
   const splits = page.getByRole("heading", { name: "Splits" }).locator("../..");
   await expect(splits.getByText("Groceries", { exact: true })).toBeVisible();
   await expect(splits.getByText("Travel", { exact: true })).toBeVisible();
-  await expect(splits.getByText("6,00 €", { exact: true })).toBeVisible();
-  await expect(splits.getByText("4,00 €", { exact: true })).toBeVisible();
+  await expect(splits.getByText("€6.00", { exact: true })).toBeVisible();
+  await expect(splits.getByText("€4.00", { exact: true })).toBeVisible();
   const fields = page.getByRole("region", { name: "Transaction fields" });
   await expect(fields.getByText("Checking", { exact: true })).toBeVisible();
   await expect(fields.getByText("Category", { exact: true })).toHaveCount(0);
@@ -191,9 +193,9 @@ test("splitting an inbox row categorizes it across two buckets", async ({
   await splitDialog.getByRole("button", { name: "Split", exact: true }).click();
   await expect(page).not.toHaveURL(/edit-splits/);
   await expect(splits.getByText("Dining", { exact: true })).toBeVisible();
-  await expect(splits.getByText("2,00 €", { exact: true })).toBeVisible();
-  await expect(splits.getByText("3,00 €", { exact: true })).toBeVisible();
-  await expect(splits.getByText("5,00 €", { exact: true })).toBeVisible();
+  await expect(splits.getByText("€2.00", { exact: true })).toBeVisible();
+  await expect(splits.getByText("€3.00", { exact: true })).toBeVisible();
+  await expect(splits.getByText("€5.00", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Edit splits" }).click();
   splitDialog = page.getByRole("dialog", { name: "Split transaction" });

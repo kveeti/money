@@ -23,15 +23,6 @@ const match = {
   kind: "transfer",
 };
 
-function longDate(value: string) {
-  return new Intl.DateTimeFormat("fi-FI", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
-}
-
 async function mockInbox(page: Page, date = source.date) {
   await page.route("**/api/v1/currencies", (route) =>
     route.fulfill({ json: [{ code: "EUR", exponent: 2 }] }),
@@ -62,7 +53,7 @@ test.describe("date-only values west of UTC", () => {
     await page.goto("/e2e/fixture/");
 
     await expect
-      .soft(page.getByRole("heading", { name: longDate(source.date) }))
+      .soft(page.getByRole("heading", { name: "Jul 1, 2001" }))
       .toBeVisible();
 
     await page.getByRole("button", { name: /Source/ }).click();
@@ -70,12 +61,10 @@ test.describe("date-only values west of UTC", () => {
 
     const dialog = page.getByRole("dialog", { name: "Match transactions" });
     await expect(dialog).toBeVisible();
-    await expect
-      .soft(dialog.locator("section"))
-      .toContainText(longDate(source.date));
+    await expect.soft(dialog.locator("section")).toContainText("Jul 1, 2001");
     await expect(
       dialog.getByRole("option").filter({ hasText: "Candidate" }),
-    ).toContainText(longDate(match.date));
+    ).toContainText("Jul 2, 2001");
   });
 });
 
@@ -93,7 +82,7 @@ test.describe("date-only values on a skipped local day", () => {
     await page.goto("/e2e/fixture/");
 
     await expect(
-      page.getByRole("heading", { name: longDate(date) }),
+      page.getByRole("heading", { name: "Dec 30, 2011" }),
     ).toBeVisible();
   });
 });

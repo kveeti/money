@@ -23,7 +23,7 @@ function useI18nValue(props: {
   isLoading: boolean;
   isError: boolean;
 }) {
-  const locale = "fi-FI";
+  const locale = undefined;
   const timeZone = useMemo(
     () => new Intl.DateTimeFormat(locale).resolvedOptions().timeZone,
     [locale],
