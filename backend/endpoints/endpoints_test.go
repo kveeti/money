@@ -56,7 +56,7 @@ func TestOriginGuardRejectsUnsafeForeignRequests(t *testing.T) {
 }
 
 func TestSecurityHeaders(t *testing.T) {
-	handler := SecurityHeaders(true, true)(http.NotFoundHandler())
+	handler := SecurityHeaders(true, true, "https://auth.example/realms/main")(http.NotFoundHandler())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/@me", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -64,7 +64,7 @@ func TestSecurityHeaders(t *testing.T) {
 	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
 	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
 	require.Equal(t, "DENY", response.Header().Get("X-Frame-Options"))
-	require.NotEmpty(t, response.Header().Get("Content-Security-Policy"))
+	require.Contains(t, response.Header().Get("Content-Security-Policy"), "form-action 'self' https://auth.example;")
 	require.NotEmpty(t, response.Header().Get("Strict-Transport-Security"))
 }
 
