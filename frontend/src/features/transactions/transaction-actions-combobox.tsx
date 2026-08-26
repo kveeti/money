@@ -36,7 +36,14 @@ export function TransactionActionsCombobox(props: {
   const newTags = useTagComboboxState({
     query,
     search,
-    selectedItems: props.transactions.flatMap((t) => t.postings),
+    selectedItems: props.transactions.flatMap((transaction) =>
+      transaction.postings.filter(
+        (posting) =>
+          !posting.imported &&
+          (posting.bucket.kind === "expense" ||
+            posting.bucket.kind === "income"),
+      ),
+    ),
   });
   const remove = useRemoveTransactionAction({
     ids: props.ids,

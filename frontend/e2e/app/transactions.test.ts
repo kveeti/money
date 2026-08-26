@@ -192,6 +192,31 @@ async function holdFailedRequest(
   };
 }
 
+test("bulk tagging selected imported transactions persists", async ({
+  page,
+}, testInfo) => {
+  await setupTransactions(page, testInfo);
+  await selectFailureTransactions(page);
+  await page.getByRole("combobox").filter({ hasText: "Actions" }).click();
+  await page
+    .getByRole("combobox", { name: "Filter transaction actions" })
+    .fill("reviewed");
+  const tag = page.getByRole("option").filter({ hasText: "Create #reviewed" });
+  await expect(tag).toBeVisible();
+
+  const response = page.waitForResponse(
+    (next) =>
+      next.url().endsWith("/api/v1/transactions/tags") &&
+      next.request().method() === "POST",
+  );
+  await tag.click();
+  expect((await response).status()).toBe(200);
+
+  await page.reload();
+  await expect(row(page, "Failure one")).toContainText("#reviewed");
+  await expect(row(page, "Failure two")).toContainText("#reviewed");
+});
+
 test("search, recategorize, and remove persisted transactions", async ({
   page,
 }, testInfo) => {
