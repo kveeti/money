@@ -37,6 +37,8 @@ import { Checkbox } from "../../ui/checkbox/checkbox";
 import { BucketPicker } from "../buckets/bucket-picker";
 import { useI18n } from "../i18n/use-i18n";
 import { BucketComboRoot, BucketComboTrigger } from "./bucket-combo";
+import { useEntriesInbox } from "./entries-inbox-context";
+import { EntriesInboxTransactions } from "./entries-inbox-dialog";
 import { useInboxFilters } from "./inbox-filter-state";
 import { InboxFiltersButton } from "./inbox-filters";
 import { InboxUndoProvider } from "./inbox-undo";
@@ -45,8 +47,6 @@ import {
   MatchTransactions,
   useMatchTransactions,
 } from "./match-transactions-dialog";
-import { useSplitInbox } from "./split-inbox-context";
-import { SplitInboxTransactions } from "./split-inbox-dialog";
 
 export default function InboxPage() {
   const searchQuery = useSearchParam("q");
@@ -84,7 +84,7 @@ export default function InboxPage() {
           end={<InboxFiltersButton />}
         />
 
-        <SplitInboxTransactions>
+        <EntriesInboxTransactions>
           <MatchTransactions>
             <List
               selection={selection}
@@ -96,7 +96,7 @@ export default function InboxPage() {
               visibleIds={visibleIds}
             />
           </MatchTransactions>
-        </SplitInboxTransactions>
+        </EntriesInboxTransactions>
 
         <FloatingBar selection={selection} />
 
@@ -117,7 +117,7 @@ function List(props: {
 }) {
   const { f, isLoading: i18nLoading, isError: i18nError } = useI18n();
   const matchContext = useMatchTransactions();
-  const splitContext = useSplitInbox();
+  const entriesContext = useEntriesInbox();
 
   if (props.inboxQuery.isLoading || i18nLoading) {
     return <ListSkeleton />;
@@ -144,7 +144,7 @@ function List(props: {
   return (
     <BucketComboRoot
       onMatchAction={matchContext.openMatchingTo}
-      onSplitAction={splitContext.open}
+      onEntriesAction={entriesContext.open}
     >
       {props.inboxItems.length ? (
         <ul

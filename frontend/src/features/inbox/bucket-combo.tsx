@@ -50,8 +50,8 @@ type BucketComboItem =
       name: string;
     }
   | {
-      type: "split";
-      id: "split";
+      type: "entries";
+      id: "entries";
       name: string;
     };
 
@@ -72,7 +72,7 @@ type BucketComboSession = {
 export function BucketComboRoot(props: {
   children: ReactNode;
   onMatchAction?: (rowId: string) => void;
-  onSplitAction?: (rowId: string) => void;
+  onEntriesAction?: (rowId: string) => void;
 }) {
   const { mutateAsync } = useCategorizeInboxMutation();
   const undo = useInboxUndo();
@@ -131,8 +131,8 @@ export function BucketComboRoot(props: {
   const actions: BucketComboItem[] = [];
   if (props.onMatchAction)
     actions.push({ type: "match", id: "match", name: "Match transactions" });
-  if (props.onSplitAction)
-    actions.push({ type: "split", id: "split", name: "Split transaction" });
+  if (props.onEntriesAction)
+    actions.push({ type: "entries", id: "entries", name: "Edit entries" });
   if (actions.length) {
     groups.push({ id: "actions", name: "Actions", items: actions });
   }
@@ -163,8 +163,8 @@ export function BucketComboRoot(props: {
       props.onMatchAction?.(session.rowId);
       return;
     }
-    if (item.type === "split") {
-      props.onSplitAction?.(session.rowId);
+    if (item.type === "entries") {
+      props.onEntriesAction?.(session.rowId);
       return;
     }
 

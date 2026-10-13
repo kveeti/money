@@ -3,7 +3,7 @@ import {
   ArrowsRightLeftIcon,
   CalendarDaysIcon,
 } from "@heroicons/react/24/outline";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 
 import { useBucketsQuery } from "../../api/buckets";
@@ -11,8 +11,8 @@ import {
   useCategorizePostingMutation,
   useDeleteTransactionMutation,
   usePatchTransactionMutation,
-  useSplitTransactionMutation,
   useTransactionQuery,
+  useUpdateTransactionEntriesMutation,
   useUnmatchTransferMutation,
   type Posting,
   type Transaction,
@@ -29,10 +29,7 @@ import { Field } from "../../ui/input/field";
 import { Input } from "../../ui/input/input";
 import { BucketPicker } from "../buckets/bucket-picker";
 import { useI18n } from "../i18n/use-i18n";
-import {
-  SplitTransactionDialog,
-  type SplitAllocation,
-} from "./split-transaction-dialog";
+import { EditEntriesDialog, type EntryAllocation } from "./edit-entries-dialog";
 import { TagsField } from "./transaction-details/tag-field";
 
 export default function TransactionDetailPage(props: {
@@ -67,55 +64,66 @@ export default function TransactionDetailPage(props: {
 
 function TransactionDetail(props: { transaction: Transaction }) {
   const categoryPosting = getCategoryPosting(props.transaction);
-  const splitPostings = getSplitPostings(props.transaction);
+  const categoryPostings = getCategoryPostings(props.transaction);
+  const editablePostings = props.transaction.postings.filter(
+    (posting) => !posting.imported,
+  );
   const accountNames = getAccountNames(props.transaction);
   const importedPosting = props.transaction.postings.find(
     (posting) => posting.imported,
   );
-  const splitOpen = useSearchParam("edit-splits") !== null;
-  const split = useSplitTransactionMutation();
+  const entriesOpen = useSearchParam("edit-entries") !== null;
+  const updateEntries = useUpdateTransactionEntriesMutation();
   const buckets = useBucketsQuery();
-  const splitVersion = useRef(props.transaction.latest_posting_timestamp);
-  if (!splitOpen) {
-    splitVersion.current = props.transaction.latest_posting_timestamp;
+  const editVersion = useRef(props.transaction.latest_posting_timestamp);
+  if (!entriesOpen) {
+    editVersion.current = props.transaction.latest_posting_timestamp;
   }
   const { f } = useI18n();
-  const canSplit =
+  const canEditEntries = Boolean(
     !props.transaction.transfer &&
     importedPosting &&
-    splitPostings.length >= 1 &&
-    props.transaction.postings.length === splitPostings.length + 1 &&
-    splitPostings.every(
+    editablePostings.length >= 1 &&
+    props.transaction.postings.filter((posting) => posting.imported).length ===
+      1 &&
+    editablePostings.every(
       (posting) => posting.currency === importedPosting.currency,
-    );
-  const allocations = canSplit ? initialSplitAllocations(splitPostings) : [];
+    ),
+  );
+  const entryAllocations = canEditEntries
+    ? editablePostings.map((posting) => ({
+        id: posting.id,
+        bucketId: posting.bucket.id,
+        amount: posting.amount,
+      }))
+    : [];
 
-  function openSplit() {
-    split.reset();
-    splitVersion.current = props.transaction.latest_posting_timestamp;
-    setSearchParam("edit-splits", "1");
+  function openEditor() {
+    updateEntries.reset();
+    editVersion.current = props.transaction.latest_posting_timestamp;
+    setSearchParam("edit-entries", "1");
   }
 
-  function closeSplit() {
-    setSearchParam("edit-splits", undefined);
+  function closeEditor() {
+    updateEntries.reset();
+    setSearchParam("edit-entries", undefined);
   }
 
-  function saveSplit(next: SplitAllocation[]) {
-    if (!canSplit || split.isPending) return;
-    const postings = next.flatMap((allocation) => {
+  function saveEntries(next: EntryAllocation[]) {
+    if (updateEntries.isPending || !importedPosting || !canEditEntries) return;
+    const postings = next.flatMap((entry) => {
       const bucket = buckets.data?.find(
-        (candidate) => candidate.id === allocation.bucketId,
+        (candidate) => candidate.id === entry.bucketId,
       );
       if (!bucket) return [];
-      const current = splitPostings.find(
-        (posting) => posting.id === allocation.id,
+      const current = editablePostings.find(
+        (posting) => posting.id === entry.id,
       );
       return [
         {
-          ...(allocation.id ? { id: allocation.id } : {}),
+          ...(entry.id ? { id: entry.id } : {}),
           bucket,
-          amount:
-            importedPosting.amount > 0 ? -allocation.amount : allocation.amount,
+          amount: entry.amount,
           currency: importedPosting.currency,
           statsDate: current?.stats_date ?? null,
           memo: current?.memo ?? "",
@@ -123,13 +131,13 @@ function TransactionDetail(props: { transaction: Transaction }) {
       ];
     });
     if (postings.length !== next.length) return;
-    split.mutate(
+    updateEntries.mutate(
       {
         transactionId: props.transaction.id,
-        expectedLatestPostingTimestamp: splitVersion.current,
+        expectedLatestPostingTimestamp: editVersion.current,
         postings,
       },
-      { onSuccess: closeSplit },
+      { onSuccess: closeEditor },
     );
   }
 
@@ -171,14 +179,14 @@ function TransactionDetail(props: { transaction: Transaction }) {
         <TransferCard transaction={props.transaction} />
       )}
 
-      {splitPostings.length > 1 && canSplit && (
-        <SplitDetails postings={splitPostings} onEdit={openSplit} />
+      {canEditEntries && editablePostings.length > 1 && (
+        <EntryDetails postings={editablePostings} onEdit={openEditor} />
       )}
 
-      {splitPostings.length === 1 && canSplit && (
+      {canEditEntries && editablePostings.length === 1 && (
         <div>
-          <Button type="button" variant="outline" onClick={openSplit}>
-            Split transaction
+          <Button type="button" variant="outline" onClick={openEditor}>
+            Edit entries
           </Button>
         </div>
       )}
@@ -197,21 +205,23 @@ function TransactionDetail(props: { transaction: Transaction }) {
             transactionId={props.transaction.id}
             memo={props.transaction.memo}
           />
-          {categoryPosting && splitPostings.length === 1 && (
-            <>
-              <CategoryField
-                posting={categoryPosting}
-                transactionId={props.transaction.id}
-              />
-              <TagsField posting={categoryPosting} />
-            </>
-          )}
+          {categoryPosting &&
+            categoryPostings.length === 1 &&
+            canEditEntries && (
+              <>
+                <CategoryField
+                  posting={categoryPosting}
+                  transactionId={props.transaction.id}
+                />
+                <TagsField posting={categoryPosting} />
+              </>
+            )}
         </div>
       </section>
 
-      {canSplit && (
-        <SplitTransactionDialog
-          open={splitOpen}
+      {canEditEntries && importedPosting && (
+        <EditEntriesDialog
+          open={entriesOpen}
           source={{
             counterparty: props.transaction.counterparty,
             description: props.transaction.description,
@@ -220,11 +230,10 @@ function TransactionDetail(props: { transaction: Transaction }) {
             date: props.transaction.occurred_on,
             account: importedPosting.bucket.name,
           }}
-          allocations={allocations}
-          minimumAllocations={1}
-          error={split.error?.message}
-          onClose={closeSplit}
-          onSubmit={saveSplit}
+          entries={entryAllocations}
+          error={updateEntries.error?.message}
+          onClose={closeEditor}
+          onSubmit={saveEntries}
         />
       )}
     </div>
@@ -245,7 +254,7 @@ function getAccountNames(transaction: Transaction) {
   ];
 }
 
-function getSplitPostings(transaction: Transaction) {
+function getCategoryPostings(transaction: Transaction) {
   return transaction.postings.filter(
     (posting) =>
       posting.bucket.kind === "expense" ||
@@ -254,33 +263,27 @@ function getSplitPostings(transaction: Transaction) {
   );
 }
 
-function initialSplitAllocations(postings: Posting[]) {
-  if (postings.length > 1) {
-    return postings.map((posting) => ({
-      id: posting.id,
-      bucketId: posting.bucket.id,
-      amount: Math.abs(posting.amount),
-    }));
-  }
-  return [
-    {
-      id: postings[0].id,
-      bucketId: postings[0].bucket.id,
-      amount: Math.abs(postings[0].amount),
-    },
-    { bucketId: "", amount: 0 },
-  ];
+function EntryDetails(props: { postings: Posting[]; onEdit: () => void }) {
+  return (
+    <PostingDetails title="Entries" postings={props.postings}>
+      <Button type="button" variant="ghost" onClick={props.onEdit}>
+        Edit entries
+      </Button>
+    </PostingDetails>
+  );
 }
 
-function SplitDetails(props: { postings: Posting[]; onEdit: () => void }) {
+function PostingDetails(props: {
+  title: string;
+  postings: Posting[];
+  children: ReactNode;
+}) {
   const { f } = useI18n();
   return (
     <section className="-mx-3 rounded-2xl border border-border-subtle bg-form p-6 sm:-mx-6">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="font-medium">Splits</h2>
-        <Button type="button" variant="ghost" onClick={props.onEdit}>
-          Edit splits
-        </Button>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="me-auto font-medium">{props.title}</h2>
+        {props.children}
       </div>
       <ul className="flex list-none flex-col">
         {props.postings.map((posting) => (
@@ -289,6 +292,9 @@ function SplitDetails(props: { postings: Posting[]; onEdit: () => void }) {
             className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t border-gray-200 py-2 first:border-t-0"
           >
             <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+              <span className="text-gray-600">
+                {posting.amount >= 0 ? "To" : "From"}{" "}
+              </span>
               {posting.bucket.name}
             </span>
             <span className="whitespace-nowrap tabular-nums">

@@ -137,6 +137,45 @@ func HandleSplitInboxRow(state *state.State, getUserID GetUserID) Handler {
 	}
 }
 
+func HandleCreateInboxEntries(state *state.State, getUserID GetUserID) Handler {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		userID, err := getUserID(r)
+		if err != nil {
+			return err
+		}
+		id := r.PathValue("id")
+		if err := validateUUID("inbox row id", id); err != nil {
+			return err
+		}
+		var body struct {
+			Postings []struct {
+				BucketID string `json:"bucket_id"`
+				Amount   int64  `json:"amount"`
+			} `json:"postings"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&body) != nil {
+			return NewErr("invalid request body", http.StatusBadRequest)
+		}
+		postings := make([]data.InboxSplitPosting, len(body.Postings))
+		for i, posting := range body.Postings {
+			if err := validateUUID("bucket id", posting.BucketID); err != nil {
+				return err
+			}
+			postings[i] = data.InboxSplitPosting{
+				BucketID: posting.BucketID,
+				Amount:   posting.Amount,
+			}
+		}
+		if err = state.Data.CreateInboxEntries(r.Context(), userID, id, postings); err != nil {
+			return mapTransactionErr(err)
+		}
+		Json(w, map[string]bool{"created": true})
+		return nil
+	}
+}
+
 func HandleGetInboxMatches(state *state.State, getUserID GetUserID) Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		userID, err := getUserID(r)

@@ -205,6 +205,72 @@ func TestSplitInboxRowCreatesBalancedCategoryPostings(t *testing.T) {
 	require.Equal(t, int64(400), postingByBucket(t, page.Transactions[0].Postings, travel).Amount)
 }
 
+func TestInboxEntriesCanSettleAnAssetWithAnExpense(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	deposit := createBucket(t, app, "asset", "Rental security deposit")
+	water := createBucket(t, app, "expense", "Water")
+	doImport(t, app, bank, nordeaHeader+
+		nordeaRow("2024/07/01", "-580,00", "Landlord", "Security deposit")+
+		nordeaRow("2026/07/01", "570,00", "Landlord", "Deposit return"))
+	var depositRow, returnRow inboxRow
+	for _, row := range getInbox(t, app, "") {
+		if row.Amount < 0 {
+			depositRow = row
+		} else {
+			returnRow = row
+		}
+	}
+	response := authed(t, app, http.MethodPost, "/api/v1/inbox/"+depositRow.ID+"/entries", map[string]any{"postings": []map[string]any{
+		{"bucket_id": deposit, "amount": 58000},
+	}})
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	response = authed(t, app, http.MethodPost, "/api/v1/inbox/"+returnRow.ID+"/entries", map[string]any{"postings": []map[string]any{
+		{"bucket_id": deposit, "amount": -58000},
+		{"bucket_id": water, "amount": 1000},
+	}})
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Empty(t, getInbox(t, app, ""))
+
+	balances := postingTotals(t, app)
+	require.Equal(t, int64(-1000), balances[bank]["EUR"])
+	require.Equal(t, int64(0), balances[deposit]["EUR"])
+	require.Equal(t, int64(1000), balances[water]["EUR"])
+
+	var returnedTransactionID string
+	require.NoError(t, app.d.Users.QueryRow(`select transaction_id from postings where import_row_id=$1`, returnRow.ID).Scan(&returnedTransactionID))
+	returned := getTransaction(t, app, returnedTransactionID)
+	depositPosting := postingByBucket(t, returned.Postings, deposit)
+	waterPosting := postingByBucket(t, returned.Postings, water)
+	response = authed(t, app, http.MethodPut, "/api/v1/transactions/"+returnedTransactionID+"/postings", map[string]any{
+		"expected_latest_posting_timestamp": returned.LatestPostingTimestamp,
+		"postings": []map[string]any{
+			{"id": depositPosting.ID, "bucket_id": deposit, "amount": -59000, "currency": "EUR"},
+			{"id": waterPosting.ID, "bucket_id": water, "amount": 2000, "currency": "EUR"},
+		},
+	})
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	balances = postingTotals(t, app)
+	require.Equal(t, int64(-1000), balances[bank]["EUR"])
+	require.Equal(t, int64(-1000), balances[deposit]["EUR"])
+	require.Equal(t, int64(2000), balances[water]["EUR"])
+}
+
+func TestInboxEntriesRejectAnUnbalancedTransaction(t *testing.T) {
+	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
+	bank := createBucket(t, app, "asset", "Bank")
+	deposit := createBucket(t, app, "asset", "Rental security deposit")
+	doImport(t, app, bank, nordeaHeader+nordeaRow("2026/07/01", "570,00", "Landlord", "Deposit return"))
+	row := getInbox(t, app, "")[0]
+
+	response := authed(t, app, http.MethodPost, "/api/v1/inbox/"+row.ID+"/entries", map[string]any{"postings": []map[string]any{
+		{"bucket_id": deposit, "amount": -58000},
+	}})
+	require.Equal(t, http.StatusBadRequest, response.StatusCode)
+	require.Len(t, getInbox(t, app, ""), 1)
+	require.Empty(t, decodeTxns(t, authed(t, app, http.MethodGet, "/api/v1/transactions", nil)))
+}
+
 func TestSplitInboxRowRejectsAnUnbalancedSplit(t *testing.T) {
 	app := newTestAppWith(t, appOpts{frontURL: testFrontURL})
 	bank := createBucket(t, app, "asset", "Bank")

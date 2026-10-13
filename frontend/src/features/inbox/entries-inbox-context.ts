@@ -1,6 +1,5 @@
 import { createContext } from "../../lib/create-context";
 
-export const [useSplitInbox, SplitInboxContext] = createContext<{
+export const [useEntriesInbox, EntriesInboxContext] = createContext<{
   open: (rowId: string) => void;
-  close: () => void;
 }>();

@@ -248,7 +248,7 @@ export function usePatchTransactionMutation() {
   });
 }
 
-export function useSplitTransactionMutation() {
+export function useUpdateTransactionEntriesMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -294,7 +294,7 @@ export function useSplitTransactionMutation() {
           postings: [
             ...fixed,
             ...input.postings.map((posting, index) => ({
-              id: posting.id ?? `new-split-${index}`,
+              id: posting.id ?? `new-entry-${index}`,
               bucket: posting.bucket,
               amount: posting.amount,
               currency: posting.currency,

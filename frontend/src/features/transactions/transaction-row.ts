@@ -9,8 +9,15 @@ export type TransactionRow =
       account?: string;
     }
   | {
-      kind: "split";
+      kind: "categories";
       categories: string[];
+      amount: number;
+      currency: string;
+      account: string;
+    }
+  | {
+      kind: "entries";
+      groups: { direction: "To" | "From"; names: string[] }[];
       amount: number;
       currency: string;
       account: string;
@@ -41,6 +48,10 @@ export type TransactionRow =
 export function toTransactionRow(txn: Transaction): TransactionRow {
   const name = (p: Posting) => p.bucket.name;
   const kind = (p: Posting) => p.bucket.kind;
+  const isAccount = (p: Posting) =>
+    kind(p) === "asset" || kind(p) === "liability";
+  const entryDirection = (p: Posting): "To" | "From" =>
+    p.amount >= 0 ? "To" : "From";
 
   if (txn.transfer && txn.postings.length === 1) {
     const posting = txn.postings[0];
@@ -115,48 +126,72 @@ export function toTransactionRow(txn: Transaction): TransactionRow {
     };
   }
 
-  const categoryLegs = txn.postings.filter(
-    (p) =>
-      kind(p) === "expense" || kind(p) === "income" || kind(p) === "person",
-  );
-  const accountLegs = txn.postings.filter(
-    (p) => kind(p) === "asset" || kind(p) === "liability",
-  );
+  const importedLegs = txn.postings.filter((p) => p.imported);
+  const editableLegs = txn.postings.filter((p) => !p.imported);
+  const fixedLeg = importedLegs.length === 1 ? importedLegs[0] : undefined;
   if (
-    categoryLegs.length > 1 &&
-    accountLegs.length === 1 &&
-    categoryLegs.every((p) => p.currency === accountLegs[0].currency) &&
-    categoryLegs.reduce((sum, p) => sum + p.amount, 0) ===
-      -accountLegs[0].amount
+    fixedLeg &&
+    isAccount(fixedLeg) &&
+    editableLegs.length > 1 &&
+    editableLegs.every((p) => p.currency === fixedLeg.currency)
   ) {
-    const account = accountLegs[0];
+    const isCategorySplit =
+      editableLegs.every(
+        (p) =>
+          kind(p) === "expense" || kind(p) === "income" || kind(p) === "person",
+      ) &&
+      editableLegs.every((p) => p.amount * fixedLeg.amount < 0) &&
+      editableLegs.reduce((sum, p) => sum + p.amount, 0) === -fixedLeg.amount;
+    if (isCategorySplit) {
+      return {
+        kind: "categories",
+        categories: editableLegs.map(name),
+        amount: fixedLeg.amount,
+        currency: fixedLeg.currency,
+        account: name(fixedLeg),
+      };
+    }
+
+    const directions = [...new Set(editableLegs.map(entryDirection))];
     return {
-      kind: "split",
-      categories: categoryLegs.map(name),
-      amount: account.amount,
-      currency: account.currency,
-      account: name(account),
+      kind: "entries",
+      groups: directions.map((direction) => ({
+        direction,
+        names: editableLegs
+          .filter((p) => entryDirection(p) === direction)
+          .map(name),
+      })),
+      amount: fixedLeg.amount,
+      currency: fixedLeg.currency,
+      account: name(fixedLeg),
     };
   }
 
-  if (categoryLegs.length === 1) {
-    const leg = categoryLegs[0];
-    const other =
-      txn.postings.length === 2
-        ? txn.postings.find((p) => p !== leg)
-        : undefined;
-    return {
-      kind: "simple",
-      category: name(leg),
-      amount: -leg.amount,
-      currency: leg.currency,
-      ...(other ? { account: name(other) } : {}),
-    };
+  if (txn.postings.length === 2) {
+    const category = txn.postings.find(
+      (p) =>
+        kind(p) === "expense" || kind(p) === "income" || kind(p) === "person",
+    );
+    const other = txn.postings.find((p) => p !== category);
+    if (
+      category &&
+      other &&
+      isAccount(other) &&
+      category.currency === other.currency
+    ) {
+      return {
+        kind: "simple",
+        category: name(category),
+        amount: -category.amount,
+        currency: category.currency,
+        account: name(other),
+      };
+    }
   }
 
   if (
     txn.postings.length === 2 &&
-    txn.postings.every((p) => kind(p) === "asset" || kind(p) === "liability") &&
+    txn.postings.every(isAccount) &&
     txn.postings[0].currency === txn.postings[1].currency
   ) {
     const neg = txn.postings.find((p) => p.amount < 0)!;
@@ -175,7 +210,7 @@ export function toTransactionRow(txn: Transaction): TransactionRow {
   if (
     clearingLegs.length === 2 &&
     moneyLegs.length === 2 &&
-    moneyLegs.every((p) => kind(p) === "asset" || kind(p) === "liability") &&
+    moneyLegs.every(isAccount) &&
     moneyLegs[0].currency !== moneyLegs[1].currency &&
     moneyLegs.every((money) =>
       clearingLegs.some(

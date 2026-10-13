@@ -480,7 +480,15 @@ func (d *Data) RestoreInboxRows(ctx context.Context, userID string, rowIDs []str
 }
 
 func (d *Data) SplitInboxRow(ctx context.Context, userID, rowID string, postings []InboxSplitPosting) error {
-	if len(postings) < 2 {
+	return d.createInboxTransaction(ctx, userID, rowID, postings, true)
+}
+
+func (d *Data) CreateInboxEntries(ctx context.Context, userID, rowID string, postings []InboxSplitPosting) error {
+	return d.createInboxTransaction(ctx, userID, rowID, postings, false)
+}
+
+func (d *Data) createInboxTransaction(ctx context.Context, userID, rowID string, postings []InboxSplitPosting, split bool) error {
+	if (split && len(postings) < 2) || (!split && len(postings) < 1) {
 		return ErrInvalidPostings
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
@@ -510,30 +518,42 @@ func (d *Data) SplitInboxRow(ctx context.Context, userID, rowID string, postings
 	if row.Amount == 0 {
 		return ErrInvalidPostings
 	}
-	total := row.Amount
-	if total < 0 {
-		total = -total
-	}
 	bucketIDs := make([]string, 0, len(postings))
 	seenBuckets := map[string]bool{}
-	var allocated int64
-	for i := range postings {
-		posting := &postings[i]
-		if posting.Amount <= 0 || posting.Amount > total-allocated {
+	if split {
+		total := row.Amount
+		if total < 0 {
+			total = -total
+		}
+		var allocated int64
+		for i := range postings {
+			posting := &postings[i]
+			if posting.Amount <= 0 || posting.Amount > total-allocated {
+				return ErrUnbalanced
+			}
+			allocated += posting.Amount
+			if row.Amount > 0 {
+				posting.Amount = -posting.Amount
+			}
+		}
+		if allocated != total {
 			return ErrUnbalanced
 		}
-		allocated += posting.Amount
+	}
+	for i := range postings {
+		posting := &postings[i]
+		if posting.Amount == 0 {
+			return ErrInvalidPostings
+		}
 		posting.ID = NewPrivateID()
 		if !seenBuckets[posting.BucketID] {
 			seenBuckets[posting.BucketID] = true
 			bucketIDs = append(bucketIDs, posting.BucketID)
 		}
-		if row.Amount > 0 {
-			posting.Amount = -posting.Amount
-		}
 	}
-	if allocated != total {
-		return ErrUnbalanced
+	allowedKinds := []string{"asset", "liability", "expense", "income", "person"}
+	if split {
+		allowedKinds = []string{"expense", "income", "person"}
 	}
 	var validBuckets int
 	if err = tx.QueryRowContext(ctx, `
@@ -541,13 +561,24 @@ func (d *Data) SplitInboxRow(ctx context.Context, userID, rowID string, postings
 		from buckets
 		where id = any($1::uuid[])
 		  and owner_user_id = $2
-		  and kind in ('expense', 'income', 'person')
+		  and kind = any($3::text[])
 		  and hidden = false
-	`, bucketIDs, userID).Scan(&validBuckets); err != nil {
+	`, bucketIDs, userID, allowedKinds).Scan(&validBuckets); err != nil {
 		return err
 	}
 	if validBuckets != len(bucketIDs) {
 		return ErrInvalidCategory
+	}
+	final := []Posting{{BucketID: row.BucketID, Amount: row.Amount, Currency: row.Currency}}
+	for _, posting := range postings {
+		final = append(final, Posting{
+			BucketID: posting.BucketID,
+			Amount:   posting.Amount,
+			Currency: row.Currency,
+		})
+	}
+	if err = validatePostings(final); err != nil {
+		return err
 	}
 
 	payload, err := json.Marshal(postings)

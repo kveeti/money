@@ -334,8 +334,8 @@ function Row(props: { txn: Transaction; onFilterTag: (tag: string) => void }) {
     );
   }
 
-  const split = asKind("split")(row);
-  if (split) {
+  const categories = asKind("categories")(row);
+  if (categories) {
     const who = props.txn.counterparty || props.txn.description;
     return (
       <>
@@ -343,17 +343,48 @@ function Row(props: { txn: Transaction; onFilterTag: (tag: string) => void }) {
           {who}
         </span>
         <span
-          className={`whitespace-nowrap text-base font-medium ${split.amount >= 0 ? "text-success-fg" : "text-gray-950"}`}
+          className={`whitespace-nowrap text-base font-medium ${categories.amount >= 0 ? "text-success-fg" : "text-gray-950"}`}
         >
-          {f.amount(split.amount, split.currency)}
+          {f.amount(categories.amount, categories.currency)}
         </span>
         <div className="col-span-full grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3">
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-normal text-gray-700">
-            {split.categories.join(", ")}
+            {categories.categories.join(", ")}
             <TagList tags={props.txn.tags} onFilter={props.onFilterTag} />
           </span>
           <span className="whitespace-nowrap text-sm font-normal text-gray-700">
-            {split.account}
+            {categories.account}
+          </span>
+        </div>
+      </>
+    );
+  }
+
+  const entries = asKind("entries")(row);
+  if (entries) {
+    const who = props.txn.counterparty || props.txn.description;
+    return (
+      <>
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-base font-medium text-gray-950">
+          {who}
+        </span>
+        <span
+          className={`whitespace-nowrap text-base font-medium ${entries.amount >= 0 ? "text-success-fg" : "text-gray-950"}`}
+        >
+          {f.amount(entries.amount, entries.currency)}
+        </span>
+        <div className="col-span-full grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3">
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-normal text-gray-700">
+            {entries.groups.map((group, index) => (
+              <Fragment key={group.direction}>
+                {index > 0 && ", "}
+                {group.direction} {group.names.join(", ")}
+              </Fragment>
+            ))}
+            <TagList tags={props.txn.tags} onFilter={props.onFilterTag} />
+          </span>
+          <span className="whitespace-nowrap text-sm font-normal text-gray-700">
+            {entries.account}
           </span>
         </div>
       </>

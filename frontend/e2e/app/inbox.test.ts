@@ -64,7 +64,203 @@ test("search, select all, and create a category against the real inbox", async (
   await expect(page.getByText("Travel")).toHaveCount(3);
 });
 
-test("splitting an inbox row categorizes it across two buckets", async ({
+test("signed entries settle a security deposit with a withheld expense", async ({
+  page,
+}, testInfo) => {
+  await login(page, testInfo);
+  const checking = await createBucket(page, "asset", "Checking");
+  await createBucket(page, "asset", "Rental security deposit");
+  await createBucket(page, "expense", "Rent");
+  await createBucket(page, "expense", "Water");
+  await importNordea(
+    page,
+    checking.id,
+    nordeaRow("2024/07/01", "-869,99", "Deposit paid") +
+      nordeaRow("2026/07/01", "570,00", "Deposit returned"),
+  );
+
+  await page.goto("/inbox");
+  const paid = page.getByRole("listitem").filter({ hasText: "Deposit paid" });
+  await paid.getByRole("button").click();
+  await page.getByRole("option", { name: "Edit entries" }).click();
+  await expect(
+    page.locator('[aria-label="Choose category, person, or action"]'),
+  ).not.toBeAttached();
+  let dialog = page.getByRole("dialog", { name: "Edit entries" });
+  await dialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" })
+    .click();
+  await dialog
+    .getByRole("option", { name: "Rental security deposit", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("option", {
+      name: "Rental security deposit",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await dialog.getByLabel("Entry 1 amount").fill("580.00");
+  await dialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" })
+    .click();
+  await dialog.getByRole("option", { name: "Rent", exact: true }).click();
+  await expect(
+    dialog.getByRole("option", { name: "Rent", exact: true }),
+  ).toHaveCount(0);
+  await dialog.getByLabel("Entry 2 amount").fill("289.99");
+  await dialog.getByRole("button", { name: "Save entries" }).click();
+
+  const returned = page
+    .getByRole("listitem")
+    .filter({ hasText: "Deposit returned" });
+  await returned.getByRole("button").click();
+  await page.getByRole("option", { name: "Edit entries" }).click();
+  await expect(
+    page.locator('[aria-label="Choose category, person, or action"]'),
+  ).not.toBeAttached();
+  dialog = page.getByRole("dialog", { name: "Edit entries" });
+  await dialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" })
+    .click();
+  await dialog
+    .getByRole("option", { name: "Rental security deposit", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("option", {
+      name: "Rental security deposit",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await dialog.getByLabel("Entry 1 amount").fill("580.00");
+  await dialog.getByLabel("Entry 1 direction").selectOption("from");
+  await dialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" })
+    .click();
+  await dialog.getByRole("option", { name: "Water", exact: true }).click();
+  await expect(
+    dialog.getByRole("option", { name: "Water", exact: true }),
+  ).toHaveCount(0);
+  await dialog.getByLabel("Entry 2 direction").selectOption("to");
+  await dialog.getByLabel("Entry 2 amount").fill("10.00");
+  await dialog.getByRole("button", { name: "Save entries" }).click();
+
+  await expect(page.getByText("No transactions to categorize")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const response = await page.request.get("/api/v1/transactions");
+      const body = (await response.json()) as {
+        transactions: {
+          postings: { bucket: { name: string }; amount: number }[];
+        }[];
+      };
+      return body.transactions
+        .flatMap((transaction) => transaction.postings)
+        .reduce<Record<string, number>>((totals, posting) => {
+          totals[posting.bucket.name] =
+            (totals[posting.bucket.name] ?? 0) + posting.amount;
+          return totals;
+        }, {});
+    })
+    .toEqual({
+      Checking: -29999,
+      Rent: 28999,
+      "Rental security deposit": 0,
+      Water: 1000,
+    });
+
+  await page.goto("/transactions");
+  const paidTransaction = page
+    .getByRole("listitem")
+    .filter({ hasText: "Deposit paid" });
+  await expect(paidTransaction).toContainText("-€869.99");
+  await expect(
+    paidTransaction.getByText("To Rental security deposit, Rent", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    paidTransaction.getByText("Checking", { exact: true }),
+  ).toBeVisible();
+
+  const returnedTransaction = page
+    .getByRole("listitem")
+    .filter({ hasText: "Deposit returned" });
+  await expect(returnedTransaction).toContainText("€570.00");
+  await expect(
+    returnedTransaction.getByText("From Rental security deposit, To Water", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    returnedTransaction.getByText("Checking", { exact: true }),
+  ).toBeVisible();
+  await returnedTransaction
+    .getByRole("link", { name: "View Deposit returned" })
+    .click();
+  const entries = page
+    .getByRole("heading", { name: "Entries" })
+    .locator("../..");
+  await expect(
+    entries.getByText("From Rental security deposit", { exact: true }),
+  ).toBeVisible();
+  await expect(entries.getByText("To Water", { exact: true })).toBeVisible();
+  await entries.getByRole("button", { name: "Edit entries" }).click();
+  dialog = page.getByRole("dialog", { name: "Edit entries" });
+  await expect(dialog.getByLabel("Entry 1 direction")).toHaveValue("from");
+  await expect(dialog.getByLabel("Entry 1 amount")).toHaveValue("580.00");
+  await expect(dialog.getByLabel("Entry 2 direction")).toHaveValue("to");
+  await expect(dialog.getByLabel("Entry 2 amount")).toHaveValue("10.00");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveAttribute("data-ending-style", "");
+  await expect(dialog).not.toBeAttached();
+});
+
+test("mixed category directions show the bank amount and both entries", async ({
+  page,
+}, testInfo) => {
+  await login(page, testInfo);
+  const checking = await createBucket(page, "asset", "Checking");
+  const salary = await createBucket(page, "income", "Salary");
+  const tax = await createBucket(page, "expense", "Tax");
+  await importNordea(
+    page,
+    checking.id,
+    nordeaRow("2026/07/01", "570,00", "Pay after withholding"),
+  );
+  const response = await page.request.get("/api/v1/inbox");
+  expect(response).toBeOK();
+  const inbox = (await response.json()) as { rows: { id: string }[] };
+  const created = await page.request.post(
+    `/api/v1/inbox/${inbox.rows[0].id}/entries`,
+    {
+      data: {
+        postings: [
+          { bucket_id: salary.id, amount: -58000 },
+          { bucket_id: tax.id, amount: 1000 },
+        ],
+      },
+    },
+  );
+  expect(created).toBeOK();
+
+  await page.goto("/transactions");
+  const transaction = page
+    .getByRole("listitem")
+    .filter({ hasText: "Pay after withholding" });
+  await expect(transaction).toContainText("€570.00");
+  await expect(
+    transaction.getByText("From Salary, To Tax", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    transaction.getByText("Checking", { exact: true }),
+  ).toBeVisible();
+});
+
+test("editing inbox entries categorizes it across two buckets", async ({
   page,
 }, testInfo) => {
   await login(page, testInfo);
@@ -85,63 +281,55 @@ test("splitting an inbox row categorizes it across two buckets", async ({
     .filter({ hasText: "Split market" })
     .getByRole("button")
     .click();
-  await page.getByRole("option", { name: "Split transaction" }).click();
-  await expect(page).toHaveURL(/split-inbox=/);
+  await page.getByRole("option", { name: "Edit entries" }).click();
+  await expect(page).toHaveURL(/entries-inbox=/);
   await page.reload();
 
-  const dialog = page.getByRole("dialog", { name: "Split transaction" });
+  const dialog = page.getByRole("dialog", { name: "Edit entries" });
   await expect(dialog.getByText("Split market")).toBeVisible();
-  await expect(dialog.getByLabel("Split 1 amount")).toHaveValue("");
-  await expect(dialog.getByLabel("Split 2 amount")).toHaveValue("");
-  const categories = dialog.getByRole("combobox");
-  await categories.nth(0).click();
+  await expect(dialog.getByLabel("Entry 1 amount")).toHaveValue("");
+  let entryBuckets = dialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" });
+  await entryBuckets.first().click();
   await page.getByRole("option", { name: "Groceries", exact: true }).click();
-  await categories.nth(1).click();
+  entryBuckets = dialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" });
+  await entryBuckets.last().click();
   await page
     .getByRole("option", { name: "Travel", exact: true })
     .last()
     .click();
-  await expect(dialog.getByRole("combobox")).toHaveCount(3);
-  await expect(dialog.getByRole("button", { name: "Add split" })).toHaveCount(
-    0,
-  );
-  await dialog.getByLabel("Split 1 amount").fill("6.00");
+  await expect(dialog.getByLabel(/Entry \d+ direction/)).toHaveCount(3);
+  await dialog.getByLabel("Entry 1 amount").fill("6.00");
   await expect(
-    dialog.getByText("€4.00 remaining", { exact: true }),
+    dialog.getByText("Difference: €4.00", { exact: true }),
   ).toBeVisible();
-  await dialog.getByLabel("Split 2 amount").fill("4.00");
+  await dialog.getByLabel("Entry 2 amount").fill("4.00");
 
-  let failSplit = true;
-  await page.route("**/api/v1/inbox/*/split", async (route) => {
-    if (failSplit) {
-      failSplit = false;
-      await route.fulfill({ status: 500, json: { error: "Split failed" } });
+  let failEntries = true;
+  await page.route("**/api/v1/inbox/*/entries", async (route) => {
+    if (failEntries) {
+      failEntries = false;
+      await route.fulfill({ status: 500, json: { error: "Entries failed" } });
       return;
     }
     await route.continue();
   });
-  await dialog.getByRole("button", { name: "Split", exact: true }).click();
-  await expect(dialog.getByText("Split failed", { exact: true })).toBeVisible();
-  await expect(dialog.getByLabel("Split 1 amount")).toHaveValue("6.00");
-  await expect(dialog.getByLabel("Split 2 amount")).toHaveValue("4.00");
-  await expect(page).toHaveURL(/split-inbox=/);
-
-  await dialog.getByRole("button", { name: "Split", exact: true }).click();
-  await expect(page).not.toHaveURL(/split-inbox=/);
-  const tinyRow = page
-    .getByRole("listitem")
-    .filter({ hasText: "Tiny purchase" });
-  await expect(tinyRow).toBeVisible();
-  await tinyRow.getByRole("button").click();
-  await page.getByRole("option", { name: "Split transaction" }).click();
+  await dialog.getByRole("button", { name: "Save entries" }).click();
   await expect(
-    dialog.getByText(
-      "This transaction cannot be split because each split must be at least €0.01.",
-      { exact: true },
-    ),
+    dialog.getByText("Entries failed", { exact: true }),
   ).toBeVisible();
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await expect(page).not.toHaveURL(/split-inbox=/);
+  await expect(dialog.getByLabel("Entry 1 amount")).toHaveValue("6.00");
+  await expect(dialog.getByLabel("Entry 2 amount")).toHaveValue("4.00");
+  await expect(page).toHaveURL(/entries-inbox=/);
+
+  await dialog.getByRole("button", { name: "Save entries" }).click();
+  await expect(page).not.toHaveURL(/entries-inbox=/);
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "Tiny purchase" }),
+  ).toBeVisible();
 
   const response = await page.request.get("/api/v1/transactions");
   const body = (await response.json()) as {
@@ -170,85 +358,95 @@ test("splitting an inbox row categorizes it across two buckets", async ({
   await expect(transactionRow).not.toContainText("€6.00");
   await transactionRow.getByRole("link", { name: "View Split market" }).click();
 
-  const splits = page.getByRole("heading", { name: "Splits" }).locator("../..");
-  await expect(splits.getByText("Groceries", { exact: true })).toBeVisible();
-  await expect(splits.getByText("Travel", { exact: true })).toBeVisible();
-  await expect(splits.getByText("€6.00", { exact: true })).toBeVisible();
-  await expect(splits.getByText("€4.00", { exact: true })).toBeVisible();
+  const entries = page
+    .getByRole("heading", { name: "Entries" })
+    .locator("../..");
+  await expect(
+    entries.getByText("To Groceries", { exact: true }),
+  ).toBeVisible();
+  await expect(entries.getByText("To Travel", { exact: true })).toBeVisible();
+  await expect(entries.getByText("€6.00", { exact: true })).toBeVisible();
+  await expect(entries.getByText("€4.00", { exact: true })).toBeVisible();
   const fields = page.getByRole("region", { name: "Transaction fields" });
   await expect(fields.getByText("Checking", { exact: true })).toBeVisible();
   await expect(fields.getByText("Category", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Edit splits" }).click();
-  await expect(page).toHaveURL(/edit-splits=1/);
-  let splitDialog = page.getByRole("dialog", { name: "Split transaction" });
-  await splitDialog.getByLabel("Split 1 amount").fill("2.00");
-  await splitDialog.getByLabel("Split 2 amount").fill("3.00");
-  await splitDialog.getByRole("combobox").last().click();
+  await entries.getByRole("button", { name: "Edit entries" }).click();
+  await expect(page).toHaveURL(/edit-entries=1/);
+  let entriesDialog = page.getByRole("dialog", { name: "Edit entries" });
+  await entriesDialog.getByLabel("Entry 1 amount").fill("2.00");
+  await entriesDialog.getByLabel("Entry 2 amount").fill("3.00");
+  await entriesDialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" })
+    .last()
+    .click();
   await page
     .getByRole("option", { name: "Dining", exact: true })
     .last()
     .click();
-  await splitDialog.getByLabel("Split 3 amount").fill("5.00");
-  await splitDialog.getByRole("button", { name: "Split", exact: true }).click();
-  await expect(page).not.toHaveURL(/edit-splits/);
-  await expect(splits.getByText("Dining", { exact: true })).toBeVisible();
-  await expect(splits.getByText("€2.00", { exact: true })).toBeVisible();
-  await expect(splits.getByText("€3.00", { exact: true })).toBeVisible();
-  await expect(splits.getByText("€5.00", { exact: true })).toBeVisible();
+  await entriesDialog.getByLabel("Entry 3 amount").fill("5.00");
+  await entriesDialog.getByRole("button", { name: "Save entries" }).click();
+  await expect(page).not.toHaveURL(/edit-entries/);
+  await expect(entries.getByText("To Dining", { exact: true })).toBeVisible();
+  await expect(entries.getByText("€2.00", { exact: true })).toBeVisible();
+  await expect(entries.getByText("€3.00", { exact: true })).toBeVisible();
+  await expect(entries.getByText("€5.00", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit splits" }).click();
-  splitDialog = page.getByRole("dialog", { name: "Split transaction" });
-  await splitDialog.getByLabel("Split 1 amount").fill("10.00");
-  await splitDialog
-    .getByRole("button", { name: /Remove split/ })
+  await entries.getByRole("button", { name: "Edit entries" }).click();
+  entriesDialog = page.getByRole("dialog", { name: "Edit entries" });
+  await entriesDialog.getByLabel("Entry 1 amount").fill("10.00");
+  await entriesDialog
+    .getByRole("button", { name: /Remove entry/ })
     .nth(1)
     .click();
-  await splitDialog
-    .getByRole("button", { name: /Remove split/ })
+  await entriesDialog
+    .getByRole("button", { name: /Remove entry/ })
     .nth(1)
     .click();
-  await splitDialog.getByRole("button", { name: "Split", exact: true }).click();
-  await expect(page).not.toHaveURL(/edit-splits/);
-  await expect(splitDialog).not.toBeVisible();
-  await expect(page.getByRole("heading", { name: "Splits" })).toHaveCount(0);
+  await entriesDialog.getByRole("button", { name: "Save entries" }).click();
+  await expect(page).not.toHaveURL(/edit-entries/);
+  await expect(entriesDialog).not.toBeVisible();
+  await expect(page.getByRole("heading", { name: "Entries" })).toHaveCount(0);
   await expect(
     fields.getByRole("combobox").filter({ hasText: "Groceries" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Split transaction" }).click();
-  splitDialog = page.getByRole("dialog", { name: "Split transaction" });
-  await expect(splitDialog.getByLabel("Split 1 amount")).toHaveValue("10.00");
-  await expect(splitDialog.getByLabel("Split 2 amount")).toHaveValue("");
-  await splitDialog
-    .getByRole("button", { name: /Remove split/ })
+  await page.getByRole("button", { name: "Edit entries" }).click();
+  entriesDialog = page.getByRole("dialog", { name: "Edit entries" });
+  await expect(entriesDialog.getByLabel("Entry 1 amount")).toHaveValue("10.00");
+  await expect(entriesDialog.getByLabel("Entry 2 amount")).toHaveValue("");
+  await entriesDialog
+    .getByRole("button", { name: /Remove entry/ })
     .first()
     .click();
-  await splitDialog
-    .getByRole("button", { name: /Remove split/ })
-    .first()
-    .click();
-  await splitDialog
-    .getByRole("button", { name: /Remove split/ })
+  await entriesDialog
+    .getByRole("button", { name: /Remove entry/ })
     .first()
     .click();
   await expect(
-    splitDialog.getByRole("button", { name: /Remove split/ }),
+    entriesDialog.getByRole("button", { name: /Remove entry/ }),
   ).toHaveCount(1);
-  await expect(splitDialog.getByRole("combobox")).toHaveCount(1);
+  await expect(entriesDialog.getByLabel(/Entry \d+ direction/)).toHaveCount(1);
 
-  await splitDialog.getByRole("combobox").click();
+  let emptyBuckets = entriesDialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" });
+  await emptyBuckets.first().click();
   await page
     .getByRole("option", { name: "Groceries", exact: true })
     .last()
     .click();
-  await splitDialog.getByRole("combobox").last().click();
+  emptyBuckets = entriesDialog
+    .getByRole("combobox")
+    .filter({ hasText: "Account, category, or person" });
+  await emptyBuckets.last().click();
   await page
     .getByRole("option", { name: "Travel", exact: true })
     .last()
     .click();
-  await splitDialog.getByLabel("Split 1 amount").fill("5.00");
-  await splitDialog.getByLabel("Split 2 amount").fill("5.00");
+  await entriesDialog.getByLabel("Entry 1 amount").fill("5.00");
+  await entriesDialog.getByLabel("Entry 2 amount").fill("5.00");
 
   const concurrentChangeStatus = await page.evaluate(async () => {
     const transactionId = window.location.pathname.split("/").at(-1);
@@ -273,18 +471,18 @@ test("splitting an inbox row categorizes it across two buckets", async ({
   });
   expect(concurrentChangeStatus).toBe(200);
 
-  await splitDialog.getByRole("button", { name: "Split", exact: true }).click();
+  await entriesDialog.getByRole("button", { name: "Save entries" }).click();
   await expect(
-    splitDialog.getByText(
+    entriesDialog.getByText(
       "transaction postings changed since you opened the editor",
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(splitDialog.getByLabel("Split 1 amount")).toHaveValue("5.00");
-  await expect(splitDialog.getByLabel("Split 2 amount")).toHaveValue("5.00");
-  await expect(page).toHaveURL(/edit-splits=1/);
-  await splitDialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(page).not.toHaveURL(/edit-splits/);
+  await expect(entriesDialog.getByLabel("Entry 1 amount")).toHaveValue("5.00");
+  await expect(entriesDialog.getByLabel("Entry 2 amount")).toHaveValue("5.00");
+  await expect(page).toHaveURL(/edit-entries=1/);
+  await entriesDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page).not.toHaveURL(/edit-entries/);
 });
 
 test("inbox and transactions load older rows from the real backend", async ({

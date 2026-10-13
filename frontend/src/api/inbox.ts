@@ -55,10 +55,11 @@ export interface InboxPage {
 
 export type InboxCacheSnapshot = QuerySnapshot<InfiniteData<InboxPage>>;
 
-export function useInboxItemQuery(id: string) {
+export function useInboxItemQuery(id: string | null, enabled = true) {
   return useQuery({
-    queryKey: inboxKeys.detail(id),
+    queryKey: inboxKeys.detail(id ?? ""),
     queryFn: () => api<InboxItem>(`/api/v1/inbox/${id}`),
+    enabled: enabled && id !== null,
   });
 }
 
@@ -186,7 +187,7 @@ export function useCategorizeInboxMutation() {
   });
 }
 
-export function useSplitInboxMutation() {
+export function useCreateInboxEntriesMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -194,7 +195,7 @@ export function useSplitInboxMutation() {
       rowId: string;
       postings: { bucketId: string; amount: number }[];
     }) =>
-      api<{ split: true }>(`/api/v1/inbox/${input.rowId}/split`, {
+      api<{ created: true }>(`/api/v1/inbox/${input.rowId}/entries`, {
         method: "POST",
         body: JSON.stringify({
           postings: input.postings.map((posting) => ({
