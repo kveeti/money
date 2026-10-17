@@ -184,6 +184,7 @@
 
             export OIDC_CLIENT_ID=dev
             export OIDC_CLIENT_SECRET=dev
+            export SESSION_ENCRYPTION_KEY="''${SESSION_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}"
 
             echo "Ports: backend $PORT, frontend $VITE_PORT, IdP $DEVIDP_PORT, Postgres $PGPORT"
             echo "URLs: app $BACKEND_URL, IdP $DEVIDP_ISSUER"

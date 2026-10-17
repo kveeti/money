@@ -65,7 +65,7 @@ func HandleDemoLogin(st *state.State) Handler {
 		if err := st.Data.CreateDemoUser(r.Context(), user); err != nil {
 			return NewUnexpectedErr("error creating demo user: %w", err)
 		}
-		if err := issueSession(w, st, r, user.ID, demoDuration); err != nil {
+		if err := issueSession(w, st, r, user.ID, demoDuration, nil); err != nil {
 			return err
 		}
 
@@ -134,11 +134,15 @@ func HandleCallback(st *state.State) Handler {
 
 		ctx, cancel := context.WithTimeout(r.Context(), externalRequestTimeout)
 		defer cancel()
-		claims, err := st.OIDC.Exchange(ctx, r.URL.Query().Get("code"), flow.Nonce, flow.Verifier)
+		login, err := st.OIDC.Exchange(ctx, r.URL.Query().Get("code"), flow.Nonce, flow.Verifier)
+		if auth.IsVerificationUnavailable(err) {
+			return authUnavailable
+		}
 		if err != nil {
 			return NewErr("oidc verification failed", http.StatusUnauthorized)
 		}
 
+		claims := login.Claims
 		user, err := st.Data.GetUserBySubject(r.Context(), claims.Issuer, claims.Subject)
 		if err != nil {
 			return NewUnexpectedErr("error getting user: %w", err)
@@ -156,7 +160,7 @@ func HandleCallback(st *state.State) Handler {
 			}
 		}
 
-		if err := issueSession(w, st, r, user.ID, sessionDuration); err != nil {
+		if err := issueSession(w, st, r, user.ID, sessionDuration, &login.Tokens); err != nil {
 			return err
 		}
 
@@ -168,13 +172,10 @@ func HandleCallback(st *state.State) Handler {
 
 func HandleLogout(state *state.State) Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		info, err := Authenticate(state, r)
-		if err != nil {
-			return err
-		}
-
-		if err := state.Data.DeleteSession(r.Context(), info.SessionID); err != nil {
-			return NewUnexpectedErr("error deleting session: %w", err)
+		if cookie, err := r.Cookie(auth.CookieName); err == nil {
+			if err := state.Data.DeleteSessionByTokenHash(r.Context(), auth.HashToken(cookie.Value)); err != nil {
+				return NewUnexpectedErr("error deleting session: %w", err)
+			}
 		}
 
 		expired := time.Unix(0, 0)
@@ -188,7 +189,7 @@ func HandleLogout(state *state.State) Handler {
 // issueSession creates a session row keyed by the hash of a new opaque token
 // and sets that token as the auth cookie. Call it once the OIDC identity is
 // verified.
-func issueSession(w http.ResponseWriter, st *state.State, r *http.Request, userID string, duration time.Duration) error {
+func issueSession(w http.ResponseWriter, st *state.State, r *http.Request, userID string, duration time.Duration, tokens *auth.TokenSet) error {
 	rawToken, tokenHash, err := auth.NewSessionToken()
 	if err != nil {
 		return NewUnexpectedErr("error generating session token: %w", err)
@@ -203,6 +204,16 @@ func issueSession(w http.ResponseWriter, st *state.State, r *http.Request, userI
 		TokenHash: tokenHash,
 		CreatedAt: now,
 		ExpiresAt: expiry,
+	}
+	if tokens != nil {
+		session.AccessToken, err = st.TokenCipher.Encrypt(tokens.AccessToken, session.ID+":access")
+		if err != nil {
+			return NewUnexpectedErr("error encrypting access token: %w", err)
+		}
+		session.RefreshToken, err = st.TokenCipher.Encrypt(tokens.RefreshToken, session.ID+":refresh")
+		if err != nil {
+			return NewUnexpectedErr("error encrypting refresh token: %w", err)
+		}
 	}
 	if err := st.Data.InsertSession(r.Context(), session); err != nil {
 		return NewUnexpectedErr("error inserting session: %w", err)

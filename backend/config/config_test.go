@@ -18,6 +18,7 @@ func setRequired(t *testing.T) {
 	t.Setenv("DEMO_RATE_LIMIT_PER_HOUR", "")
 	t.Setenv("BACKEND_URL", "http://localhost:8000")
 	t.Setenv("DB_URL", "postgres://localhost/db")
+	t.Setenv("SESSION_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	t.Setenv("OIDC_ISSUER", "https://issuer.example")
 	t.Setenv("OIDC_CLIENT_ID", "client")
 	t.Setenv("OIDC_CLIENT_SECRET", "secret")
@@ -25,6 +26,7 @@ func setRequired(t *testing.T) {
 	t.Setenv("FRONT_URL", "")
 	t.Setenv("DEV_VITE_URL", "")
 	t.Setenv("OIDC_REDIRECT_URL", "")
+	t.Setenv("OIDC_AUDIENCE", "")
 	t.Setenv("ENABLEBANKING_APP_ID", "")
 	t.Setenv("ENABLEBANKING_PRIVATE_KEY", "")
 	t.Setenv("ENABLEBANKING_API_ORIGIN", "")
@@ -103,7 +105,7 @@ func TestLoadConfig_FrontURLUsedWhenSet(t *testing.T) {
 }
 
 func TestLoadConfig_MissingRequiredErrors(t *testing.T) {
-	for _, missing := range []string{"BACKEND_URL", "DB_URL", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"} {
+	for _, missing := range []string{"BACKEND_URL", "DB_URL", "SESSION_ENCRYPTION_KEY", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"} {
 		t.Run(missing, func(t *testing.T) {
 			setRequired(t)
 			t.Setenv(missing, "")
@@ -112,6 +114,13 @@ func TestLoadConfig_MissingRequiredErrors(t *testing.T) {
 			require.ErrorContains(t, err, missing)
 		})
 	}
+}
+
+func TestLoadConfigSessionEncryptionKey(t *testing.T) {
+	setRequired(t)
+	t.Setenv("SESSION_ENCRYPTION_KEY", "short")
+	_, err := LoadConfig()
+	require.ErrorContains(t, err, "base64-encoded 32 bytes")
 }
 
 func TestLoadConfigParsesEnableBankingSubjectAllowlist(t *testing.T) {

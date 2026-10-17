@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/textproto"
@@ -25,8 +26,9 @@ type Config struct {
 	// DevViteUrl, when set, makes the backend reverse-proxy every non-API request
 	// to the Vite dev server at this URL (for HMR) instead of serving the embedded
 	// build. Empty = serve the embedded frontend. Dev only.
-	DevViteUrl string
-	DbUrl      string
+	DevViteUrl           string
+	DbUrl                string
+	SessionEncryptionKey [32]byte
 
 	// ImportStore selects where uploaded import files are kept: "disk" (under
 	// ImportDir) or "postgres" (default, bytea).
@@ -64,6 +66,7 @@ type OIDCConfig struct {
 	ClientID     string
 	ClientSecret string
 	RedirectURL  string
+	Audience     string
 }
 
 // EffectiveFrontUrl is where users are sent after login: FrontUrl if set,
@@ -92,6 +95,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("front_url", c.FrontUrl),
 		slog.String("dev_vite_url", c.DevViteUrl),
 		slog.String("db_url", redact(c.DbUrl)),
+		slog.String("session_encryption_key", "[REDACTED]"),
 		slog.String("import_store", c.ImportStore),
 		slog.String("import_dir", c.ImportDir),
 		slog.Bool("disable_rate_sync", c.DisableRateSync),
@@ -100,6 +104,7 @@ func (c Config) LogValue() slog.Value {
 			slog.String("client_id", c.OIDC.ClientID),
 			slog.String("client_secret", redact(c.OIDC.ClientSecret)),
 			slog.String("redirect_url", c.OIDC.RedirectURL),
+			slog.String("audience", c.OIDC.Audience),
 		),
 		slog.Group("enable_banking",
 			slog.String("application_id", c.EnableBanking.ApplicationID),
@@ -213,21 +218,29 @@ func LoadConfig() (*Config, error) {
 			ClientID:     os.Getenv("OIDC_CLIENT_ID"),
 			ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 			RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
+			Audience:     os.Getenv("OIDC_AUDIENCE"),
 		},
 	}
 
 	required := map[string]string{
-		"BACKEND_URL":        config.BackendUrl,
-		"DB_URL":             config.DbUrl,
-		"OIDC_ISSUER":        config.OIDC.Issuer,
-		"OIDC_CLIENT_ID":     config.OIDC.ClientID,
-		"OIDC_CLIENT_SECRET": config.OIDC.ClientSecret,
+		"BACKEND_URL":            config.BackendUrl,
+		"DB_URL":                 config.DbUrl,
+		"SESSION_ENCRYPTION_KEY": os.Getenv("SESSION_ENCRYPTION_KEY"),
+		"OIDC_ISSUER":            config.OIDC.Issuer,
+		"OIDC_CLIENT_ID":         config.OIDC.ClientID,
+		"OIDC_CLIENT_SECRET":     config.OIDC.ClientSecret,
 	}
 	for name, value := range required {
 		if value == "" {
 			return nil, fmt.Errorf("invalid config: %s not set", name)
 		}
 	}
+
+	encryptionKey, err := base64.StdEncoding.DecodeString(os.Getenv("SESSION_ENCRYPTION_KEY"))
+	if err != nil || len(encryptionKey) != len(config.SessionEncryptionKey) {
+		return nil, fmt.Errorf("invalid config: SESSION_ENCRYPTION_KEY must be base64-encoded 32 bytes")
+	}
+	copy(config.SessionEncryptionKey[:], encryptionKey)
 
 	if config.ClientIPHeader != "" {
 		if !validHeaderName(config.ClientIPHeader) {

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"money/backend/auth"
 	"money/backend/data"
 	"money/backend/state"
 
@@ -216,60 +215,6 @@ func Cors(frontUrl string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-var invalidAuth = NewErr("invalid auth", http.StatusUnauthorized)
-
-func Authenticate(state *state.State, r *http.Request) (*AuthInfo, error) {
-	cookie, err := r.Cookie(auth.CookieName)
-	if err != nil {
-		return nil, invalidAuth
-	}
-
-	session, err := state.Data.GetSessionByTokenHash(r.Context(), auth.HashToken(cookie.Value))
-	if err != nil {
-		return nil, NewUnexpectedErr("error getting session: %w", err)
-	}
-	if session == nil {
-		return nil, invalidAuth
-	}
-
-	return &AuthInfo{
-		UserID:    session.UserID,
-		Subject:   session.Subject,
-		SessionID: session.ID,
-	}, nil
-}
-
-func GetUserIDMiddleware(state *state.State) GetUserID {
-	return func(r *http.Request) (string, error) {
-		info, err := Authenticate(state, r)
-		if err != nil {
-			return "", err
-		}
-		return info.UserID, nil
-	}
-}
-
-func GetEnableBankingUserIDMiddleware(state *state.State) GetUserID {
-	return func(r *http.Request) (string, error) {
-		info, err := Authenticate(state, r)
-		if err != nil {
-			return "", err
-		}
-		if !state.Config.EnableBanking.AllowsSubject(info.Subject) {
-			return "", NewErr("Enable Banking is not available for this account", http.StatusForbidden)
-		}
-		return info.UserID, nil
-	}
-}
-
-type GetUserID func(r *http.Request) (string, error)
-
-type AuthInfo struct {
-	UserID    string
-	Subject   string
-	SessionID string
 }
 
 type ApiError struct {

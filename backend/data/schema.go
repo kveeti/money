@@ -29,12 +29,20 @@ var demoUsersMigration string
 //go:embed migrations/005_demo_rate_limits.sql
 var demoRateLimitsMigration string
 
+//go:embed migrations/006_oidc_session_tokens.sql
+var oidcSessionTokensMigration string
+
+//go:embed migrations/007_pending_session_tokens.sql
+var pendingSessionTokensMigration string
+
 var migrations = []migration{
 	{version: 1, sql: initialMigration},
 	{version: 2, sql: importLimitsMigration},
 	{version: 3, sql: maintenanceMigration},
 	{version: 4, sql: demoUsersMigration},
 	{version: 5, sql: demoRateLimitsMigration},
+	{version: 6, sql: oidcSessionTokensMigration},
+	{version: 7, sql: pendingSessionTokensMigration},
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) (err error) {

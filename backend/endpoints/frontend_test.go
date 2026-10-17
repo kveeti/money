@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ func TestFrontendDevProxy(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	st := state.NewState(nil, &config.Config{DevViteUrl: upstream.URL}, nil)
+	st := state.NewState(context.Background(), nil, &config.Config{DevViteUrl: upstream.URL}, nil)
 	srv := httptest.NewServer(FrontendHandler(st, nil))
 	defer srv.Close()
 

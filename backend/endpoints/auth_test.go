@@ -16,6 +16,7 @@ import (
 	"money/backend/data"
 	"money/backend/state"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/oauth2-proxy/mockoidc"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +47,7 @@ type appOpts struct {
 	denyEnableBanking bool
 	demoMode          bool
 	clientIPHeader    string
+	oidcMiddleware    func(http.Handler) http.Handler
 }
 
 // newTestAppWith wires a mock OIDC provider, a fresh database and the real
@@ -54,8 +56,14 @@ type appOpts struct {
 func newTestAppWith(t *testing.T, opts appOpts) *testApp {
 	t.Helper()
 
-	m, err := mockoidc.Run()
+	m, err := mockoidc.NewServer(nil)
 	require.NoError(t, err)
+	if opts.oidcMiddleware != nil {
+		require.NoError(t, m.AddMiddleware(opts.oidcMiddleware))
+	}
+	providerListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	require.NoError(t, m.Start(providerListener, nil))
 	t.Cleanup(func() { _ = m.Shutdown() })
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -94,7 +102,7 @@ func newTestAppWith(t *testing.T, opts appOpts) *testApp {
 			AllowedSubjects: allowedSubjects,
 		},
 	}
-	st := state.NewState(d, appConfig, oidcClient)
+	st := state.NewState(workerCtx, d, appConfig, oidcClient)
 
 	srv := &http.Server{Handler: GetRouter(st, testFrontendFS())}
 	go func() { _ = srv.Serve(ln) }()
@@ -135,6 +143,29 @@ func completeLogin(t *testing.T, app *testApp) *http.Response {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusFound, resp.StatusCode)
 	return resp
+}
+
+func replaceSessionAccessToken(t *testing.T, app *testApp, cookie *http.Cookie, expiry time.Time) (*data.Session, string) {
+	t.Helper()
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(cookie.Value))
+	require.NoError(t, err)
+	require.NotNil(t, session)
+
+	now := time.Now()
+	raw, err := app.mock.Keypair.SignJWT(jwt.RegisteredClaims{
+		Audience:  jwt.ClaimStrings{app.mock.ClientID},
+		ExpiresAt: jwt.NewNumericDate(expiry),
+		IssuedAt:  jwt.NewNumericDate(now.Add(-2 * time.Minute)),
+		Issuer:    app.mock.Issuer(),
+		NotBefore: jwt.NewNumericDate(now.Add(-2 * time.Minute)),
+		Subject:   session.Subject,
+	})
+	require.NoError(t, err)
+	encrypted, err := app.state.TokenCipher.Encrypt(raw, session.ID+":access")
+	require.NoError(t, err)
+	_, err = app.d.Sessions.Exec(`update sessions set access_token = $2 where id = $1`, session.ID, encrypted)
+	require.NoError(t, err)
+	return session, encrypted
 }
 
 func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
@@ -239,16 +270,255 @@ func TestOIDCFullFlow(t *testing.T) {
 	require.NotNil(t, authCookie)
 	require.NotEmpty(t, authCookie.Value)
 
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	require.NotEmpty(t, session.AccessToken)
+	require.NotEmpty(t, session.RefreshToken)
+	rawAccess, rawRefresh, err := decryptSessionTokens(app.state, session)
+	require.NoError(t, err)
+	require.NotEqual(t, rawAccess, session.AccessToken)
+	require.NotEqual(t, rawRefresh, session.RefreshToken)
+	_, err = app.state.OIDC.VerifyAccess(t.Context(), rawAccess)
+	require.NoError(t, err)
+
 	// the session authenticates a request, returning the upserted user.
 	req, _ := http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
 	req.AddCookie(authCookie)
-	resp, err := app.client.Do(req)
+	resp, err = app.client.Do(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var body map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.Equal(t, "jane.doe@example.com", body["email"])
+}
+
+func TestExpiredAccessTokenRefreshesBeforeRequest(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+
+	_, encryptedExpired := replaceSessionAccessToken(t, app, authCookie, time.Now().Add(-time.Minute))
+
+	req, _ := http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	refreshed, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+	require.NoError(t, err)
+	require.NotNil(t, refreshed)
+	require.NotEqual(t, encryptedExpired, refreshed.AccessToken)
+	rawAccess, _, err := decryptSessionTokens(app.state, refreshed)
+	require.NoError(t, err)
+	claims, err := app.state.OIDC.VerifyAccess(t.Context(), rawAccess)
+	require.NoError(t, err)
+	require.Greater(t, time.Until(claims.Expiry), time.Minute)
+}
+
+func TestNearExpiryAccessTokenRefreshesInBackground(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+	_, encryptedNearExpiry := replaceSessionAccessToken(t, app, authCookie, time.Now().Add(30*time.Second))
+
+	req, _ := http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+		return err == nil && session != nil && session.AccessToken != encryptedNearExpiry
+	}, 2*time.Second, 20*time.Millisecond)
+}
+
+func TestInvalidRefreshGrantRevokesSession(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+	replaceSessionAccessToken(t, app, authCookie, time.Now().Add(-time.Minute))
+	app.mock.ErrorQueue.Push(&mockoidc.ServerError{Code: http.StatusBadRequest, Error: "invalid_grant", Description: "revoked"})
+
+	req, _ := http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+	require.NoError(t, err)
+	require.Nil(t, session)
+}
+
+func TestTemporaryRefreshFailureUsesSharedCooldown(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+	replaceSessionAccessToken(t, app, authCookie, time.Now().Add(-time.Minute))
+	app.mock.ErrorQueue.Push(&mockoidc.ServerError{Code: http.StatusInternalServerError, Error: "server_error", Description: "down"})
+
+	req, _ := http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err := app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	require.NotNil(t, session.RefreshRetryAfter)
+	require.True(t, session.RefreshRetryAfter.After(time.Now()))
+
+	// This queued error remains unused because the next request observes the
+	// database cooldown instead of calling the provider again.
+	app.mock.ErrorQueue.Push(&mockoidc.ServerError{Code: http.StatusTeapot, Error: "unexpected_call"})
+	req, _ = http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	req.AddCookie(authCookie)
+	resp, err = app.client.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	app.mock.ErrorQueue.Lock()
+	require.Len(t, app.mock.ErrorQueue.Queue, 1)
+	app.mock.ErrorQueue.Unlock()
+}
+
+func TestSessionRowLockReloadsRefreshedTokens(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+	require.NoError(t, err)
+	first, err := app.d.LockSession(t.Context(), session.ID, false)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	defer first.Rollback()
+
+	type lockResult struct {
+		lock *data.SessionLock
+		err  error
+	}
+	result := make(chan lockResult, 1)
+	go func() {
+		lock, err := app.d.LockSession(t.Context(), session.ID, false)
+		result <- lockResult{lock: lock, err: err}
+	}()
+
+	select {
+	case <-result:
+		t.Fatal("second session lock did not wait")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	require.NoError(t, first.SaveTokens(t.Context(), "new-access", "new-refresh"))
+	require.NoError(t, first.Commit())
+
+	second := <-result
+	require.NoError(t, second.err)
+	require.NotNil(t, second.lock)
+	defer second.lock.Rollback()
+	require.Equal(t, "new-access", second.lock.Session.AccessToken)
+	require.Equal(t, "new-refresh", second.lock.Session.RefreshToken)
+}
+
+func TestEarlyRefreshLockSkipsBusySession(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	authCookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, authCookie)
+
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(authCookie.Value))
+	require.NoError(t, err)
+	lock, err := app.d.LockSession(t.Context(), session.ID, false)
+	require.NoError(t, err)
+	require.NotNil(t, lock)
+	defer lock.Rollback()
+
+	skipped, err := app.d.LockSession(t.Context(), session.ID, true)
+	require.NoError(t, err)
+	require.Nil(t, skipped)
+}
+
+func TestUnavailableSigningKeyKeepsSession(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	cookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, cookie)
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(cookie.Value))
+	require.NoError(t, err)
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.RegisteredClaims{
+		Audience:  jwt.ClaimStrings{app.mock.ClientID},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Issuer:    app.mock.Issuer(),
+		Subject:   session.Subject,
+	})
+	token.Header["kid"] = "provider-key-not-cached"
+	raw, err := token.SignedString(app.mock.Keypair.PrivateKey)
+	require.NoError(t, err)
+	encrypted, err := app.state.TokenCipher.Encrypt(raw, session.ID+":access")
+	require.NoError(t, err)
+	_, err = app.d.Sessions.Exec(`update sessions set access_token = $2 where id = $1`, session.ID, encrypted)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodGet, app.url+"/api/v1/users/@me", nil)
+	require.NoError(t, err)
+	req.AddCookie(cookie)
+	response, err := app.client.Do(req)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
+	_, err = authenticateWithLock(t.Context(), app.state, session.ID)
+	require.ErrorIs(t, err, authUnavailable)
+	saved, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(cookie.Value))
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.Equal(t, encrypted, saved.AccessToken)
+}
+
+func TestLogoutWorksWithExpiredAccessTokenAndProviderDown(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	loginResponse := completeLogin(t, app)
+	cookie := findCookie(loginResponse.Cookies(), auth.CookieName)
+	require.NotNil(t, cookie)
+	replaceSessionAccessToken(t, app, cookie, time.Now().Add(-time.Minute))
+	require.NoError(t, app.mock.Shutdown())
+
+	req, err := http.NewRequest(http.MethodPost, app.url+"/api/v1/auth/logout", nil)
+	require.NoError(t, err)
+	req.AddCookie(cookie)
+	response, err := app.client.Do(req)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	cleared := findCookie(response.Cookies(), auth.CookieName)
+	require.NotNil(t, cleared)
+	require.Empty(t, cleared.Value)
+	session, err := app.d.GetSessionByTokenHash(t.Context(), auth.HashToken(cookie.Value))
+	require.NoError(t, err)
+	require.Nil(t, session)
+
+	response, err = app.client.Do(req)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+}
+
+func TestLogoutWithoutCookie(t *testing.T) {
+	app := newTestAppWith(t, appOpts{})
+	response, err := app.client.Post(app.url+"/api/v1/auth/logout", "", nil)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	require.NotNil(t, findCookie(response.Cookies(), auth.CookieName))
 }
 
 func TestLogoutDeletesSessionAndRedirectsToLogin(t *testing.T) {

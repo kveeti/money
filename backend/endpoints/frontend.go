@@ -38,6 +38,10 @@ func FrontendHandler(st *state.State, dist fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isNavigation(r) {
 			_, authErr := Authenticate(st, r)
+			if apiErr, ok := authErr.(*ApiError); ok && apiErr.httpStatus != http.StatusUnauthorized {
+				http.Error(w, http.StatusText(apiErr.httpStatus), apiErr.httpStatus)
+				return
+			}
 			if r.URL.Path == "/login" {
 				if authErr == nil {
 					http.Redirect(w, r, "/transactions", http.StatusFound)

@@ -48,7 +48,7 @@ func App(config *config.Config, started chan struct{}) {
 		d.StartRateSync(ctx)
 	}
 
-	appState := state.NewState(d, config, oidc)
+	appState := state.NewState(ctx, d, config, oidc)
 	if config.EnableBanking.Enabled() {
 		client, err := enablebanking.New(config.EnableBanking.ApplicationID, config.EnableBanking.PrivateKeyPath, config.EnableBanking.APIOrigin)
 		if err != nil {
