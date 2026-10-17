@@ -88,6 +88,16 @@
         in
         {
           default = app;
+          dockerImage = pkgs.dockerTools.buildLayeredImage {
+            name = "money";
+            tag = "latest";
+            contents = [ app pkgs.cacert ];
+            config = {
+              Entrypoint = [ "${app}/bin/money" ];
+              Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+              ExposedPorts = { "8000/tcp" = {}; };
+            };
+          };
         }
       );
 

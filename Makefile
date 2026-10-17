@@ -5,8 +5,24 @@ ifneq (,$(wildcard ./.env))
 endif
 endif
 
-.PHONY: all e2e httpsproxy httpsdev httpsdevi
+.PHONY: all docker-build e2e httpsproxy httpsdev httpsdevi
 MAKEFLAGS += -j
+
+docker-build:
+	@set -eu; \
+	arch="$$(docker info --format '{{.Architecture}}')"; \
+	case "$$arch" in \
+		aarch64|arm64) system=aarch64-linux; platform=linux/arm64 ;; \
+		x86_64|amd64) system=x86_64-linux; platform=linux/amd64 ;; \
+		*) echo "Unsupported Docker architecture: $$arch" >&2; exit 1 ;; \
+	esac; \
+	out="$$(mktemp -d)"; \
+	trap 'rm -rf "$$out"' EXIT; \
+	docker run --rm --platform "$$platform" \
+		-v "$$PWD:/src:ro" -v "$$out:/out" -w /src nixos/nix:latest \
+		sh -c "nix --extra-experimental-features 'nix-command flakes' build .#packages.$$system.dockerImage --out-link /tmp/money-image && cp /tmp/money-image /out/money.tar.gz"; \
+	docker load < "$$out/money.tar.gz"; \
+	docker tag money:latest veetik/money:latest
 
 backdev:
 	@cd backend && go run .
