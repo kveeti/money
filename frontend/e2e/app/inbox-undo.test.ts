@@ -56,7 +56,9 @@ async function importRow(
 async function categorize(page: Page) {
   await page.getByRole("button", { name: /Undo shop/ }).click();
   await page.getByRole("option", { name: "Groceries" }).click();
-  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Undo shop")).not.toBeVisible();
 }
 
@@ -82,7 +84,7 @@ test("real app: inbox undo restores the imported row", async ({ page }) => {
   await categorize(page);
 
   const undoFinished = page.waitForResponse("**/api/v1/inbox/restore");
-  await page.getByRole("button", { name: "Undo" }).click();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByText("Undo shop")).toBeVisible();
   releaseCategorization();
   await categorizationFinished;
@@ -95,7 +97,9 @@ test("real app: inbox undo restores the imported row", async ({ page }) => {
   await expect(
     page.locator('[aria-label^="Choose category"]'),
   ).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "Undo" })).not.toBeVisible({
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true }),
+  ).not.toBeVisible({
     timeout: 8000,
   });
   await page.keyboard.press("Meta+z");

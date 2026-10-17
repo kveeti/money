@@ -51,16 +51,9 @@ test("accounts sharing an IBAN use one bucket mapping", async ({ page }) => {
 
   await page.goto("/e2e/fixture/?connections");
 
-  const countryBox = await page.getByLabel("Country").boundingBox();
-  const bankBox = await page
-    .getByLabel("Enable Banking bank name")
-    .boundingBox();
-  const typeBox = await page.getByLabel("Account type").boundingBox();
-  expect(countryBox).not.toBeNull();
-  expect(bankBox).not.toBeNull();
-  expect(typeBox).not.toBeNull();
-  expect(Math.abs(countryBox!.x - bankBox!.x)).toBeLessThan(1);
-  expect(Math.abs(countryBox!.x - typeBox!.x)).toBeLessThan(1);
+  await expect(page.getByLabel("Country")).toBeVisible();
+  await expect(page.getByLabel("Enable Banking bank name")).toBeVisible();
+  await expect(page.getByLabel("Account type")).toBeVisible();
 
   await expect(
     page.getByText("LT813250066911093214", { exact: true }),

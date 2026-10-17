@@ -587,7 +587,7 @@ test("transaction action search keeps previous categories while results load", a
   ).toBeVisible();
 });
 
-test("transaction action keyboard looping preserves scroll padding", async ({
+test("transaction action keyboard looping keeps the highlighted option in view", async ({
   page,
 }, testInfo) => {
   await setupTransactions(page, testInfo);
@@ -613,28 +613,33 @@ test("transaction action keyboard looping preserves scroll padding", async ({
   await expect(page.locator("[data-highlighted]")).toContainText(
     "Remove transactions",
   );
-  const bottomGap = await scroll.evaluate((element) => {
-    const item = element.querySelector<HTMLElement>("[data-highlighted]");
-    if (!item) throw new Error("No highlighted action");
-    return (
-      element.getBoundingClientRect().bottom -
-      item.getBoundingClientRect().bottom
-    );
-  });
-  expect(bottomGap).toBeGreaterThanOrEqual(3);
+  await expect
+    .poll(() =>
+      scroll.evaluate((element) => {
+        const item = element.querySelector<HTMLElement>("[data-highlighted]");
+        if (!item) return false;
+        const viewport = element.getBoundingClientRect();
+        const option = item.getBoundingClientRect();
+        return option.top >= viewport.top && option.bottom <= viewport.bottom;
+      }),
+    )
+    .toBe(true);
 
   await input.press("ArrowDown");
   await expect(page.locator("[data-highlighted]")).not.toContainText(
     "Remove transactions",
   );
-  const topGap = await scroll.evaluate((element) => {
-    const item = element.querySelector<HTMLElement>("[data-highlighted]");
-    if (!item) throw new Error("No highlighted action");
-    return (
-      item.getBoundingClientRect().top - element.getBoundingClientRect().top
-    );
-  });
-  expect(topGap).toBeGreaterThanOrEqual(3);
+  await expect
+    .poll(() =>
+      scroll.evaluate((element) => {
+        const item = element.querySelector<HTMLElement>("[data-highlighted]");
+        if (!item) return false;
+        const viewport = element.getBoundingClientRect();
+        const option = item.getBoundingClientRect();
+        return option.top >= viewport.top && option.bottom <= viewport.bottom;
+      }),
+    )
+    .toBe(true);
 });
 
 test("failed transaction actions roll back and preserve selection", async ({

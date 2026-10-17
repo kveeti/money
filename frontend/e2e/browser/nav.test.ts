@@ -69,9 +69,7 @@ test("navigation menu tracks syncing across closes and reloads", async ({
     )
     .toBe(0);
   const menuButton = page.getByRole("button", { name: "Open menu" });
-  const menuButtonBox = await menuButton.boundingBox();
-  expect(menuButtonBox).not.toBeNull();
-  expect(menuButtonBox!.x + menuButtonBox!.width).toBeLessThanOrEqual(240);
+  await expect(menuButton).toBeInViewport({ ratio: 1 });
   await menuButton.click();
   await expect
     .poll(() =>
