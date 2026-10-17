@@ -37,16 +37,18 @@ type server struct {
 	issuer string
 	key    *rsa.PrivateKey
 
-	mu    sync.Mutex
-	codes map[string]pending // one-time auth code -> what /token should mint
-	users []user
+	mu      sync.Mutex
+	codes   map[string]pending // one-time auth code -> what /token should mint
+	refresh map[string]pending // refresh token -> identity and client
+	users   []user
 }
 
 // pending is the authorize-time state a code redeems for at the token endpoint.
 type pending struct {
-	sub   string
-	email string
-	nonce string
+	sub      string
+	email    string
+	nonce    string
+	clientID string
 }
 
 func main() {
@@ -59,7 +61,13 @@ func main() {
 		log.Fatalf("devidp: generating key: %v", err)
 	}
 
-	s := &server{issuer: issuer, key: key, codes: map[string]pending{}, users: seeded}
+	s := &server{
+		issuer:  issuer,
+		key:     key,
+		codes:   map[string]pending{},
+		refresh: map[string]pending{},
+		users:   seeded,
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", s.discovery)
@@ -167,15 +175,8 @@ func (s *server) picker(w http.ResponseWriter, q url.Values) {
 }
 
 func (s *server) token(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	code := r.Form.Get("code")
-
-	s.mu.Lock()
-	p, ok := s.codes[code]
-	delete(s.codes, code) // one-time use
-	s.mu.Unlock()
-	if !ok {
-		http.Error(w, "invalid code", http.StatusBadRequest)
+	if err := r.ParseForm(); err != nil {
+		writeOAuthError(w, "invalid_request")
 		return
 	}
 
@@ -184,22 +185,72 @@ func (s *server) token(w http.ResponseWriter, r *http.Request) {
 		clientID, _, _ = r.BasicAuth()
 	}
 
+	var p pending
+	var refreshToken string
+	switch r.Form.Get("grant_type") {
+	case "authorization_code":
+		code := r.Form.Get("code")
+		s.mu.Lock()
+		var ok bool
+		p, ok = s.codes[code]
+		delete(s.codes, code) // one-time use
+		if ok {
+			p.clientID = clientID
+			refreshToken = randString()
+			s.refresh[refreshToken] = p
+		}
+		s.mu.Unlock()
+		if !ok {
+			writeOAuthError(w, "invalid_grant")
+			return
+		}
+	case "refresh_token":
+		refreshToken = r.Form.Get("refresh_token")
+		s.mu.Lock()
+		var ok bool
+		p, ok = s.refresh[refreshToken]
+		s.mu.Unlock()
+		if !ok || p.clientID != clientID {
+			writeOAuthError(w, "invalid_grant")
+			return
+		}
+	default:
+		writeOAuthError(w, "unsupported_grant_type")
+		return
+	}
+
 	now := time.Now()
-	idToken := s.sign(map[string]any{
-		"iss":   s.issuer,
-		"sub":   p.sub,
-		"aud":   clientID,
-		"email": p.email,
-		"nonce": p.nonce,
-		"iat":   now.Unix(),
-		"exp":   now.Add(time.Hour).Unix(),
+	accessToken := s.sign(map[string]any{
+		"iss": s.issuer,
+		"sub": p.sub,
+		"aud": p.clientID,
+		"iat": now.Unix(),
+		"exp": now.Add(time.Hour).Unix(),
 	})
-	writeJSON(w, map[string]any{
-		"access_token": randString(),
-		"token_type":   "Bearer",
-		"expires_in":   3600,
-		"id_token":     idToken,
-	})
+	response := map[string]any{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    3600,
+	}
+	if r.Form.Get("grant_type") == "authorization_code" {
+		response["id_token"] = s.sign(map[string]any{
+			"iss":   s.issuer,
+			"sub":   p.sub,
+			"aud":   p.clientID,
+			"email": p.email,
+			"nonce": p.nonce,
+			"iat":   now.Unix(),
+			"exp":   now.Add(time.Hour).Unix(),
+		})
+	}
+	writeJSON(w, response)
+}
+
+func writeOAuthError(w http.ResponseWriter, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
 // sign builds a minimal RS256 JWT. No library: header + claims + PKCS1v15 sig.
