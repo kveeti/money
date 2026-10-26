@@ -125,8 +125,7 @@ func GetRequestID(r *http.Request) string {
 
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip frontend/proxy traffic (static assets, Vite HMR) — only log the API.
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/health" {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -15,9 +15,9 @@ in
     };
 
     environmentFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
+      type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "Environment file containing Money configuration and secrets";
+      description = "Runtime path to an environment file containing Money configuration and secrets";
     };
   };
 
@@ -33,7 +33,7 @@ in
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
-      environment = cfg.environment;
+      environment = { HOST = "127.0.0.1"; } // cfg.environment;
 
       serviceConfig = {
         ExecStart = "${moneyPkg}/bin/money";
@@ -44,19 +44,18 @@ in
         Group = "money";
 
         StateDirectory = "money";
+        StateDirectoryMode = "0700";
         WorkingDirectory = "/var/lib/money";
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
 
         CapabilityBoundingSet = [ "" ];
-        DeviceAllow = [
-          "/dev/stdin"
-          "/dev/urandom"
-        ];
-        DevicePolicy = "strict";
+        DeviceAllow = [ "" ];
+        LimitCORE = 0;
         LockPersonality = true;
         MemoryDenyWriteExecute = true;
         NoNewPrivileges = true;
         PrivateDevices = true;
+        PrivateMounts = true;
         PrivateTmp = true;
         PrivateUsers = true;
         ProcSubset = "pid";
@@ -84,7 +83,7 @@ in
           "~@privileged"
           "~@resources"
         ];
-        UMask = "0027";
+        UMask = "0077";
       };
     };
   };

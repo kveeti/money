@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -61,7 +62,7 @@ func App(config *config.Config, started chan struct{}) {
 
 	router := endpoints.GetRouter(appState, frontendFS())
 
-	s := NewHttpServer(router, ":"+config.Port)
+	s := NewHttpServer(router, net.JoinHostPort(config.Host, config.Port))
 	if err := s.Start(); err != nil {
 		panic(fmt.Errorf("error starting server: %w", err))
 	}

@@ -17,6 +17,7 @@ type Config struct {
 	ClientIPHeader         string
 	DemoRateLimitPerMinute int
 	DemoRateLimitPerHour   int
+	Host                   string
 	Port                   string
 	BackendUrl             string
 	// FrontUrl is empty when the frontend is served from the same origin as the
@@ -199,6 +200,7 @@ func LoadConfig() (*Config, error) {
 		ClientIPHeader:         os.Getenv("CLIENT_IP_HEADER"),
 		DemoRateLimitPerMinute: minuteLimit,
 		DemoRateLimitPerHour:   hourLimit,
+		Host:                   os.Getenv("HOST"),
 		Port:                   port,
 		BackendUrl:             os.Getenv("BACKEND_URL"),
 		FrontUrl:               os.Getenv("FRONT_URL"),
