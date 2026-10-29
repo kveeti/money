@@ -34,14 +34,14 @@
 
             pnpmDeps = pkgs.fetchPnpmDeps {
               inherit (finalAttrs) pname version src;
-              pnpm = pkgs.pnpm_10;
+              pnpm = pkgs.pnpm_10_latest;
               fetcherVersion = 3;
               hash = "sha256-raCssv83dQJozzDLporugZTqDyw6abJEkEgLfuGwx9s=";
             };
 
             nativeBuildInputs = [
               pkgs.nodejs_24
-              pkgs.pnpm_10
+              pkgs.pnpm_10_latest
               pkgs.pnpmConfigHook
             ];
 
@@ -110,7 +110,7 @@
             pkgs.openssl
 
             pkgs.nodejs_24
-            pkgs.pnpm_10
+            pkgs.pnpm_10_latest
             pkgs.playwright-driver.browsers
           ];
 
